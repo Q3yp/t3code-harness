@@ -53,6 +53,11 @@ import type { EnvironmentConnectionPresentation } from "@t3tools/client-runtime/
 import { settlePromise, squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
 import * as Schema from "effect/Schema";
 import { formatComposerModelMention } from "@t3tools/client-runtime/composer-model-mentions";
+import {
+  type AtMentionCategory,
+  formatModelSwitchPresetToken,
+  formatSubagentPresetToken,
+} from "@t3tools/client-runtime/composer-model-presets";
 import { isPasteAsTextShortcut } from "@t3tools/client-runtime/text-paste";
 import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
@@ -1210,10 +1215,32 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerPreviewAnnotations.length === 0 &&
     composerReviewComments.length === 0;
   const linkedEnvironments = useLinkedEnvironments(environmentId);
+  const atTriggerKey =
+    composerTrigger?.kind === "path"
+      ? `${draftId ?? ""}:${activeThreadId ?? ""}:${composerTrigger.rangeStart}`
+      : null;
+  const [atCategorySelection, setAtCategorySelection] = useState<{
+    readonly triggerKey: string;
+    readonly category: AtMentionCategory;
+  } | null>(null);
+  const activeAtCategory: AtMentionCategory =
+    atTriggerKey !== null && atCategorySelection?.triggerKey === atTriggerKey
+      ? atCategorySelection.category
+      : "all";
+  const onAtCategoryChange = (category: AtMentionCategory) => {
+    if (atTriggerKey === null) return;
+    setAtCategorySelection({ triggerKey: atTriggerKey, category });
+    setComposerHighlightedItemId(null);
+  };
+  const onAtCategoryChangeStable = useStableCallback(onAtCategoryChange);
+  const subagentPresetAvailable = draftId === null && threadHasStarted(activeThread);
   const {
     items: composerMenuItems,
     isLoading: isComposerMenuLoading,
     emptyState: composerMenuEmptyState,
+    effectiveAtCategory,
+    atCategoryLocked,
+    availableAtCategories,
   } = useComposerMenuItems({
     composerTrigger,
     environmentId,
@@ -1234,11 +1261,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     workspaceSkillsScanning,
     questionAttachmentTarget,
     modelMentions: { instanceEntries: providerInstanceEntries, modelOptionsByInstance },
+    modelPresets: settings.modelPresets,
+    providers: providerStatuses,
+    subagentPresetAvailable,
+    activeAtCategory,
   });
 
   const composerMenuOpen = Boolean(composerTrigger);
   const composerMenuSearchKey = composerTrigger
-    ? `${composerSuggestionListId}:${composerTrigger.kind}:${composerTrigger.query.trim().toLowerCase()}`
+    ? `${composerSuggestionListId}:${composerTrigger.kind}:${effectiveAtCategory}:${composerTrigger.query.trim().toLowerCase()}`
     : null;
   const activeComposerMenuItemId = resolveComposerMenuActiveItemId({
     items: composerMenuItems,
@@ -2207,6 +2238,27 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (item.type === "model") {
       if (trigger.kind !== "path") return;
       const replacement = `${formatComposerModelMention(item.instanceId, item.model)} `;
+      const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+        snapshot.value,
+        trigger.rangeEnd,
+        replacement,
+      );
+      const applied = applyPromptReplacement(trigger.rangeStart, replacementRangeEnd, replacement, {
+        expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd),
+      });
+      if (applied) {
+        setComposerHighlightedItemId(null);
+      }
+      return;
+    }
+    if (item.type === "model-preset") {
+      const expectedTriggerKind = item.mode === "subagent" ? "subagent-preset" : "path";
+      if (trigger.kind !== expectedTriggerKind) return;
+      const token =
+        item.mode === "subagent"
+          ? formatSubagentPresetToken(item.presetName)
+          : formatModelSwitchPresetToken(item.presetName);
+      const replacement = `${token} `;
       const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
         snapshot.value,
         trigger.rangeEnd,
@@ -3876,6 +3928,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     triggerKind={composerTriggerKind}
                     emptyStateText={composerMenuEmptyState}
                     activeItemId={activeComposerMenuItem?.id ?? null}
+                    atCategory={effectiveAtCategory}
+                    atCategoryLocked={atCategoryLocked}
+                    availableAtCategories={availableAtCategories}
+                    onAtCategoryChange={onAtCategoryChangeStable}
                     onHighlightedItemChange={onComposerMenuItemHighlightedStable}
                     onSelect={onSelectComposerItemStable}
                   />

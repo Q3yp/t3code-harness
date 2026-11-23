@@ -50,6 +50,7 @@ import {
   ClockIcon,
   FolderGit2Icon,
   GitBranchIcon,
+  LayersIcon,
   MessageCircleQuestionIcon,
   PinIcon,
   PinOffIcon,
@@ -305,6 +306,12 @@ function SidebarThreadTooltip({
           ) : null
         }
       >
+        {thread.activeWorkspace ? (
+          <div className="flex min-w-0 items-center gap-2">
+            <LayersIcon className="size-3 shrink-0 stroke-primary" />
+            <div className="min-w-0 truncate text-foreground/85">{thread.activeWorkspace.name}</div>
+          </div>
+        ) : null}
         {projectDisplayName ? (
           <div className="flex min-w-0 items-center gap-2">
             {project ? <ProjectFavicon project={project} className="size-3 shrink-0" /> : null}
@@ -1559,13 +1566,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
               {draftIndicator}
-              {props.project ? (
+              {thread.activeWorkspace ? (
+                <LayersIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
+              ) : props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
               ) : null}
               {/* Left of the status slot, the pin would slide when hover swaps the
                 label for the wider row controls. */}
               {pinIndicator}
-              {props.projectDisplayName ? (
+              {thread.activeWorkspace ? (
+                <span
+                  className={cn("min-w-0 flex-1 truncate font-medium text-foreground/85 text-xs")}
+                >
+                  {thread.activeWorkspace.name}
+                </span>
+              ) : props.projectDisplayName ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
                 >
@@ -1891,7 +1906,18 @@ export const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props
             />
           }
         >
-          {props.project ? (
+          {thread.activeWorkspace ? (
+            <LayersIcon
+              className={cn(
+                "size-4 shrink-0 text-primary transition-opacity",
+                props.isSettled &&
+                  !props.isRouteActive &&
+                  !props.isHighlighted &&
+                  "opacity-40 grayscale group-hover/sidebar-row:opacity-100 group-hover/sidebar-row:grayscale-0",
+              )}
+              aria-hidden
+            />
+          ) : props.project ? (
             <ProjectFavicon
               project={props.project}
               className={cn(

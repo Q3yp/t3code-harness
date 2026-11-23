@@ -2426,6 +2426,7 @@ export function makeClaudeQueryOptions(input: {
   readonly environment?: NodeJS.ProcessEnv;
   readonly mcpServers?: ClaudeQueryOptions["mcpServers"];
   readonly agentFeedback?: AgentFeedbackMode;
+  readonly agentWorkspaces?: ProviderAdapter.ProviderAdapterV2AgentWorkspaces;
   /** The thread's T3 MCP session holds the `device` capability. */
   readonly deviceToolsAvailable?: boolean;
   readonly tools?: ClaudeAgentSdkQueryTools;
@@ -2588,7 +2589,13 @@ export function makeClaudeQueryOptions(input: {
         buildRuntimeInstructions({
           harness: "Claude Code",
           agentFeedback,
-          runtimePolicy: { cwd: input.cwd, workspace: input.workspace },
+          runtimePolicy: {
+            cwd: input.cwd,
+            workspace: input.workspace,
+            ...(input.agentWorkspaces === undefined
+              ? {}
+              : { agentWorkspaces: input.agentWorkspaces }),
+          },
         }) +
           (input.mcpServers === undefined
             ? ""
@@ -13447,6 +13454,9 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
             ...(turnInput.runtimePolicy.workspace === undefined
               ? {}
               : { workspace: turnInput.runtimePolicy.workspace }),
+            ...(turnInput.runtimePolicy.agentWorkspaces === undefined
+              ? {}
+              : { agentWorkspaces: turnInput.runtimePolicy.agentWorkspaces }),
             attachmentsDir,
             settings: adapterOptions.settings,
             // Delegated threads have no one typing, so they never ask for suggestions.

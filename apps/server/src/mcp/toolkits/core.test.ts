@@ -25,7 +25,6 @@ import {
 } from "@t3tools/contracts";
 import { pinOrderKeyBetween } from "@t3tools/shared/pinOrderKey";
 import * as DateTime from "effect/DateTime";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as TestClock from "effect/testing/TestClock";
@@ -343,8 +342,9 @@ it("bounds public command rejections and redacts internal dispatch causes", () =
 
 const fullAccessThreadId = ThreadId.make("mcp-core-full-access-thread");
 
-it.effect("returns an HTML render reference that Codex and Claude tool rows both carry", () =>
-  Effect.gen(function* () {
+it.effect("returns an HTML render reference and records a server-authored html_render item", () => {
+  const recordedHtmlRenders: Array<unknown> = [];
+  return Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     const result = yield* server
       .callTool({
@@ -363,6 +363,7 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
     expect(
       htmlRenderFromToolItem({ toolName: "mcp__t3-code__html_render", output: result.content }),
     ).toEqual(reference);
+    expect(recordedHtmlRenders).toEqual([reference]);
     // Only a full-access thread may have the server read a file for it.
     const byPath = (name: string, caller: McpInvocationContext.McpInvocationScope) =>
       server
@@ -388,7 +389,6 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
     Effect.provide(
       McpHttpServer.layerHtmlToolkit.pipe(
         Layer.provideMerge(McpHttpServer.layerInProcessMcpServer),
-        Layer.provide(McpProviderSessions.layer),
         Layer.provide(PreviewBrowser.layer),
         Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: "t3-mcp-html-render-" })),
         Layer.provide(
@@ -409,12 +409,18 @@ it.effect("returns an HTML render reference that Codex and Claude tool rows both
                 runtimeMode: id === fullAccessThreadId ? "full-access" : "approval-required",
                 interactionMode: "default",
               } as OrchestrationV2ThreadShell),
+            dispatch: (command) => {
+              if (command.type === "html_render.record") {
+                recordedHtmlRenders.push(command.htmlRender);
+              }
+              return Effect.succeed({ sequence: 1, storedEvents: [] } as never);
+            },
           }),
         ),
       ),
     ),
-  ),
-);
+  );
+});
 
 it.effect("records only failed calls of tools that hand off no work", () => {
   // Recording runs detached from the tool response, so the first event is awaited.

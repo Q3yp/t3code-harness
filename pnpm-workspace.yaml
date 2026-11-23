@@ -287,6 +287,8 @@ patchedDependencies:
   react-native-pdf-jsi@6.1.0: patches/react-native-pdf-jsi@6.1.0.patch
   # The MCP Events extension (SEP-3415) on effect/ai, until Effect ships it.
   effect@4.1.5: patches/effect@4.1.5.patch
+  # Windows ARM64 has no native tsrs build yet; fall back to the installed win32-x64 binary via Prism emulation.
+  "@effect/tsgo@0.67.1": patches/@effect__tsgo@0.67.1.patch
 
 # Unmet peers fail resolution, so a pin outside a dependency's peer range is
 # caught when the lockfile changes instead of scrolling past as a warning.

@@ -24,10 +24,12 @@ import type { HtmlRenderReference } from "@t3tools/shared/htmlRender";
 import { turnItemDetailRevision } from "@t3tools/client-runtime/work-log/item-detail";
 import type { McpAppReference } from "@t3tools/shared/mcpApp";
 import {
+  compactDynamicToolOutput,
   htmlRenderFromToolItem,
   mcpAppFromToolItem,
   sentMessageFromToolItem,
 } from "@t3tools/shared/toolOutput";
+import { resolveT3McpToolId } from "@t3tools/shared/t3McpToolPresentation";
 import {
   contextCompactionLabel,
   workEntryIndicatesToolFailure,
@@ -242,6 +244,7 @@ export function derivePendingUserInputs(
 const STANDALONE_V2_ITEM_TYPES = new Set<OrchestrationV2ProjectedTurnItem["item"]["type"]>([
   "fork",
   "handoff",
+  "workspace_handoff",
   "run_interrupt_request",
   "run_interrupt_result",
   "secret_request",
@@ -592,10 +595,29 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         : [],
     ),
   );
+  // Pre-scan server-authored turn items so redundant harness dynamic_tool rows are hidden
+  // while keeping failed calls and legacy threads (without server items) visible.
+  const serverHtmlRenderAttachmentIds = new Set<string>();
+  const runsWithServerHtmlRender = new Set<RunId>();
+  const runsWithServerSentMessage = new Set<RunId>();
+  const runsWithWorkspaceHandoff = new Set<RunId>();
+  let hasServerSentMessageWithoutRun = false;
+  for (const { item } of input.visibleTurnItems) {
+    if (item.type === "html_render") {
+      serverHtmlRenderAttachmentIds.add(item.htmlRender.attachmentId);
+      if (item.runId !== null) runsWithServerHtmlRender.add(item.runId);
+    } else if (item.type === "sent_message") {
+      if (item.runId !== null) runsWithServerSentMessage.add(item.runId);
+      else hasServerSentMessageWithoutRun = true;
+    } else if (item.type === "workspace_handoff" && item.runId !== null) {
+      runsWithWorkspaceHandoff.add(item.runId);
+    }
+  }
+
   for (const row of input.visibleTurnItems) {
     const { item } = row;
     if (turnItemIsWorkspacePreparation(item) && !item.deferredWork) continue;
-    if (item.type === "checkpoint") continue;
+    if (item.type === "checkpoint" || item.type === "preview_recording") continue;
     if (
       item.type === "user_message" &&
       item.inputIntent === "queued_turn" &&
@@ -693,11 +715,67 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
       continue;
     }
 
+    if (item.type === "html_render") {
+      entries.push({
+        id: item.id,
+        kind: "html-render",
+        createdAt,
+        runId: item.runId,
+        htmlRender: item.htmlRender,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    if (item.type === "sent_message") {
+      entries.push({
+        id: item.id,
+        kind: "sent-message",
+        createdAt,
+        runId: item.runId,
+        text: item.text,
+        ...attemptMetadata,
+      });
+      continue;
+    }
+
+    if (item.type === "dynamic_tool" && item.status === "completed") {
+      const t3ToolId = resolveT3McpToolId(item.toolName);
+      const compactOutput = compactDynamicToolOutput(item.output);
+      if (compactOutput?.isError !== true) {
+        if (
+          t3ToolId === "html_render" &&
+          ((item.runId !== null && runsWithServerHtmlRender.has(item.runId)) ||
+            (htmlRenderFromToolItem(item)?.attachmentId !== undefined &&
+              serverHtmlRenderAttachmentIds.has(htmlRenderFromToolItem(item)!.attachmentId)))
+        ) {
+          continue;
+        }
+        if (
+          t3ToolId === "send_to_user" &&
+          (item.runId !== null
+            ? runsWithServerSentMessage.has(item.runId)
+            : hasServerSentMessageWithoutRun)
+        ) {
+          continue;
+        }
+        if (
+          (t3ToolId === "workspace_activate" || t3ToolId === "workspace_clear") &&
+          item.runId !== null &&
+          runsWithWorkspaceHandoff.has(item.runId) &&
+          !(t3ToolId === "workspace_activate" && compactOutput?.continuationStatus === "skipped")
+        ) {
+          continue;
+        }
+      }
+    }
+
     const htmlRender =
       item.type === "dynamic_tool" && item.status === "completed"
         ? htmlRenderFromToolItem(item)
         : undefined;
     if (htmlRender !== undefined) {
+      if (serverHtmlRenderAttachmentIds.has(htmlRender.attachmentId)) continue;
       entries.push({
         id: item.id,
         kind: "html-render",
@@ -714,6 +792,13 @@ export function deriveTimelineEntriesFromVisibleTurnItems(
         ? sentMessageFromToolItem(item)
         : undefined;
     if (sentMessage !== undefined) {
+      if (
+        item.runId !== null
+          ? runsWithServerSentMessage.has(item.runId)
+          : hasServerSentMessageWithoutRun
+      ) {
+        continue;
+      }
       entries.push({
         id: item.id,
         kind: "sent-message",

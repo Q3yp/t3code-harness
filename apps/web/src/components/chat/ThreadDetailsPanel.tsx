@@ -4,6 +4,7 @@ import type {
   ProjectId,
   ProjectScript,
   ResolvedKeybindingsConfig,
+  ThreadActiveWorkspace,
   ThreadId,
 } from "@t3tools/contracts";
 
@@ -22,6 +23,7 @@ import ProjectScriptsControl, {
 import { T, useGT } from "gt-react";
 import { useState, type ComponentProps } from "react";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
+import { ThreadWorkspaceSwitcher } from "./ThreadWorkspaceSwitcher";
 import { OpenInPicker } from "./OpenInPicker";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
@@ -58,6 +60,7 @@ interface ThreadDetailsPanelProps extends Pick<
   threadId: ThreadId;
   projectId: ProjectId;
   worktreePath: string | null;
+  activeWorkspace?: ThreadActiveWorkspace | null | undefined;
   isServerThread: boolean;
   draftId?: DraftId;
   composerDraftTarget: ComposerThreadTarget;
@@ -222,6 +225,14 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         {...branchToolbarProps}
                       />
                     ) : null}
+                    <ThreadWorkspaceSwitcher
+                      environmentId={props.environmentId}
+                      threadId={props.threadId}
+                      isServerThread={props.isServerThread}
+                      draftId={props.draftId}
+                      activeWorkspace={props.activeWorkspace ?? null}
+                      variant="panel"
+                    />
 
                     {show.openIn ? (
                       <OpenInPicker

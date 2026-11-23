@@ -314,6 +314,7 @@ export const layer: Layer.Layer<
       readonly providerThreadId: OrchestrationV2ProviderThread["id"];
       readonly runOrdinal: number;
       readonly worktreePath: string | null;
+      readonly activeWorkspacePath: string | null;
       readonly inheritedBackgroundTurnItems: ReturnType<
         typeof RunExecutionService.selectInheritedBackgroundTurnItems
       >;
@@ -361,7 +362,11 @@ export const layer: Layer.Layer<
             .pipe(Effect.catchCause(() => Effect.succeed(false))),
         hasWorkspaceMoved: () =>
           projectionStore.getRuntimeRecoveryProjection(input.threadId).pipe(
-            Effect.map((current) => current.thread.worktreePath !== input.worktreePath),
+            Effect.map(
+              (current) =>
+                current.thread.worktreePath !== input.worktreePath ||
+                (current.thread.activeWorkspace?.path ?? null) !== input.activeWorkspacePath,
+            ),
             Effect.catchCause(() => Effect.succeed(false)),
           ),
         loadUnsettledWork: (threadId: ThreadId, nodeIds: ReadonlyArray<NodeId>) =>
@@ -874,6 +879,7 @@ export const layer: Layer.Layer<
         providerThreadId: providerThread.id,
         runOrdinal: run.ordinal,
         worktreePath: projection.thread.worktreePath,
+        activeWorkspacePath: projection.thread.activeWorkspace?.path ?? null,
         inheritedBackgroundTurnItems,
       });
       const { isCurrentAttemptInStatus } = runControls;
@@ -2316,6 +2322,7 @@ export const layer: Layer.Layer<
             // holds it; the provider turn runs after it is released.
             const { thread } = yield* projectionStore.getThreadRecords(input.threadId, []);
             const cwd =
+              thread.activeWorkspace?.path ??
               thread.worktreePath ??
               (yield* projects
                 .getById(thread.projectId, { includeDeleted: true })

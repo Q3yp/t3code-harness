@@ -469,6 +469,7 @@ export function buildLocalDraftThread(
     interactionMode: draftThread.interactionMode,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,
+    ...(draftThread.activeWorkspace ? { activeWorkspace: draftThread.activeWorkspace } : {}),
     activeProviderThreadId: null,
     lineage: { rootThreadId: threadId, parentThreadId: null, relationshipToParent: null },
     forkedFrom: null,

@@ -153,5 +153,32 @@ describe("buildRuntimeInstructions", () => {
     assert.isAbove(shown, 0);
     assert.include(block, `\n- Not listed: ${128 - shown} more\n</workspace_folders>`);
     assert.isBelow(new TextEncoder().encode(block).length, 4000);
+
+    const withAgentWorkspaces = buildRuntimeInstructions({
+      harness: "Codex",
+      pullRequestLinking: false,
+      runtimePolicy: {
+        ...base,
+        cwd: "/work/coding",
+        agentWorkspaces: {
+          workspaces: [
+            {
+              name: "coding",
+              description: "Software development across projects.",
+              path: "/work/coding",
+            },
+          ],
+          errors: [],
+          activeWorkspace: { name: "coding", path: "/work/coding" },
+        },
+      },
+    });
+    assert.include(withAgentWorkspaces, "<agent_workspaces>");
+    assert.include(withAgentWorkspaces, "Active workspace: coding (/work/coding)");
+    assert.include(
+      withAgentWorkspaces,
+      "- coding: Software development across projects. (/work/coding)",
+    );
+    assert.include(withAgentWorkspaces, "</agent_workspaces>");
   });
 });

@@ -23,6 +23,7 @@ import {
   PastedTextAttachmentSource,
   type PreviewAnnotationPayload,
   RuntimeMode,
+  type ThreadActiveWorkspace,
   ThreadContextRecord,
   EnvironmentContextRecord,
   type ServerProvider,
@@ -515,6 +516,7 @@ export interface DraftSessionState {
   interactionMode: ProviderInteractionMode;
   branch: string | null;
   worktreePath: string | null;
+  activeWorkspace?: ThreadActiveWorkspace | null;
   envMode: DraftThreadEnvMode;
   startFromOrigin: boolean;
   /** Linked to the thread when the draft is sent on this branch. */
@@ -589,6 +591,7 @@ interface ComposerDraftStoreState {
       threadId?: ThreadId;
       branch?: string | null;
       worktreePath?: string | null;
+      activeWorkspace?: ThreadActiveWorkspace | null;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
@@ -606,6 +609,7 @@ interface ComposerDraftStoreState {
       threadId?: ThreadId;
       branch?: string | null;
       worktreePath?: string | null;
+      activeWorkspace?: ThreadActiveWorkspace | null;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
@@ -621,6 +625,7 @@ interface ComposerDraftStoreState {
     options: {
       branch?: string | null;
       worktreePath?: string | null;
+      activeWorkspace?: ThreadActiveWorkspace | null;
       projectRef?: ScopedProjectRef;
       createdAt?: string;
       envMode?: DraftThreadEnvMode;
@@ -1726,6 +1731,7 @@ function createDraftThreadState(
     threadId?: ThreadId;
     branch?: string | null;
     worktreePath?: string | null;
+    activeWorkspace?: ThreadActiveWorkspace | null;
     createdAt?: string;
     envMode?: DraftThreadEnvMode;
     startFromOrigin?: boolean;
@@ -1746,6 +1752,12 @@ function createDraftThreadState(
         ? null
         : (existingThread?.worktreePath ?? null)
       : (options.worktreePath ?? null);
+  const nextActiveWorkspace =
+    options?.activeWorkspace === undefined
+      ? projectChanged
+        ? null
+        : (existingThread?.activeWorkspace ?? null)
+      : (options.activeWorkspace ?? null);
   const nextBranch =
     options?.branch === undefined
       ? projectChanged
@@ -1784,6 +1796,7 @@ function createDraftThreadState(
       options?.interactionMode ?? existingThread?.interactionMode ?? DEFAULT_INTERACTION_MODE,
     branch: nextBranch,
     worktreePath: nextWorktreePath,
+    ...(nextActiveWorkspace ? { activeWorkspace: nextActiveWorkspace } : {}),
     envMode:
       options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
@@ -1835,6 +1848,14 @@ function isDraftThreadPromoting(draftThread: DraftThreadState | null | undefined
   return draftThread?.promotedTo !== null && draftThread?.promotedTo !== undefined;
 }
 
+function activeWorkspacesEqual(
+  left: ThreadActiveWorkspace | null | undefined,
+  right: ThreadActiveWorkspace | null | undefined,
+): boolean {
+  if (!left || !right) return !left && !right;
+  return left.name === right.name && left.path === right.path;
+}
+
 function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThreadState): boolean {
   return (
     !!left &&
@@ -1849,6 +1870,7 @@ function draftThreadsEqual(left: DraftThreadState | undefined, right: DraftThrea
     left.interactionMode === right.interactionMode &&
     left.branch === right.branch &&
     left.worktreePath === right.worktreePath &&
+    activeWorkspacesEqual(left.activeWorkspace, right.activeWorkspace) &&
     left.envMode === right.envMode &&
     left.startFromOrigin === right.startFromOrigin &&
     checkoutPullRequestsEqual(left.checkoutPullRequest, right.checkoutPullRequest) &&
@@ -3063,6 +3085,12 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                   ? null
                   : existing.worktreePath
                 : (options.worktreePath ?? null);
+            const nextActiveWorkspace =
+              options.activeWorkspace === undefined
+                ? projectChanged
+                  ? null
+                  : (existing.activeWorkspace ?? null)
+                : (options.activeWorkspace ?? null);
             const nextBranch =
               options.branch === undefined
                 ? projectChanged
@@ -3109,6 +3137,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               interactionMode: options.interactionMode ?? existing.interactionMode,
               branch: nextBranch,
               worktreePath: nextWorktreePath,
+              ...(nextActiveWorkspace ? { activeWorkspace: nextActiveWorkspace } : {}),
               envMode:
                 options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
@@ -3127,6 +3156,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               nextDraftThread.interactionMode === existing.interactionMode &&
               nextDraftThread.branch === existing.branch &&
               nextDraftThread.worktreePath === existing.worktreePath &&
+              activeWorkspacesEqual(nextDraftThread.activeWorkspace, existing.activeWorkspace) &&
               nextDraftThread.envMode === existing.envMode &&
               nextDraftThread.startFromOrigin === existing.startFromOrigin &&
               checkoutPullRequestsEqual(

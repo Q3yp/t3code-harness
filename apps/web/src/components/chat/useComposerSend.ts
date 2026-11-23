@@ -1,4 +1,5 @@
 import { msg } from "gt-react";
+import { resolveComposerPromptModelPresets } from "@t3tools/client-runtime/composer-model-presets";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
 import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
@@ -142,7 +143,7 @@ import type {
 } from "@t3tools/client-runtime/state/shell";
 import type { Dispatch } from "react";
 import type { ComposerThreadTarget } from "../../composerDraftStore";
-import type { ProviderInstanceEntry } from "../../providerInstances";
+import { isProviderInstancePickerReady, type ProviderInstanceEntry } from "../../providerInstances";
 import type { SessionPhase } from "../../types";
 import type { DraftSessionState } from "../../composerDraftStore";
 import type { ComposerHandleRef } from "../../composerHandleContext";
@@ -383,10 +384,20 @@ export function useComposerSend(input: ComposerSendInput) {
   const startThreadTurn = useOrchestrationCommand(threadEnvironment.startTurn, {
     reportFailure: false,
   });
+  const startDelegatedSubagent = useOrchestrationCommand(threadEnvironment.startDelegatedSubagent, {
+    reportFailure: false,
+  });
+  const setThreadModelSelection = useOrchestrationCommand(threadEnvironment.setModelSelection, {
+    reportFailure: false,
+  });
   const uploadThreadFeedback = useOrchestrationCommand(threadEnvironment.uploadFeedback, {
     reportFailure: false,
   });
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  const releaseComposerDraftModelSelection = useComposerDraftStore(
+    (store) => store.releaseModelSelection,
+  );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const sendToMultipleModels = useMultipleModelSend({
     environmentId,
@@ -827,8 +838,11 @@ export function useComposerSend(input: ComposerSendInput) {
       useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.replyTo ?? null;
     const promptForSend = withReplyReference(draftPrompt, replyTo);
     if (warnStrandedThreadContext(promptForSend, composerThreadContexts)) return;
+    const environmentModelPresets =
+      appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.settings.modelPresets ??
+      [];
     if (queuedRunEdit.isEditing) {
-      // A queued message stays in its thread, so saving `/side` would send it to main.
+      // A queued message stays in its thread, so saving `/side` or `^preset` would send it to main.
       if (!directAnnotation && parseSideChatCommand(promptAtSend)) {
         toastManager.add(
           stackedThreadToast({
@@ -836,6 +850,23 @@ export function useComposerSend(input: ComposerSendInput) {
             title: m(msg("Queued message not updated")),
             description: m(
               msg("A queued message can't move to a side chat. Remove /side or /btw to save it."),
+            ),
+          }),
+        );
+        return;
+      }
+      if (
+        !directAnnotation &&
+        resolveComposerPromptModelPresets(promptAtSend, environmentModelPresets).kind === "subagent"
+      ) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: m(msg("Queued message not updated")),
+            description: m(
+              msg(
+                "A queued message can't launch a subagent. Remove the leading ^preset to save it.",
+              ),
             ),
           }),
         );
@@ -860,13 +891,156 @@ export function useComposerSend(input: ComposerSendInput) {
       );
       return;
     }
+
+    // Match leading ^preset against the raw user prompt before reply/annotation prefixes are prepended.
+    const leadingSubagentPreset =
+      multipleModelSelections === null
+        ? resolveComposerPromptModelPresets(promptAtSend, environmentModelPresets)
+        : { kind: "none" as const };
+    const resolvedPreset =
+      leadingSubagentPreset.kind === "subagent"
+        ? leadingSubagentPreset
+        : multipleModelSelections === null
+          ? resolveComposerPromptModelPresets(promptForSend, environmentModelPresets)
+          : { kind: "none" as const };
+
+    if (resolvedPreset.kind === "subagent") {
+      if (!isServerThread || activeMessageCount === 0) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: m(msg("Start this thread first")),
+            description: m(
+              msg("Send a message in this thread before starting a subagent with ^preset."),
+            ),
+          }),
+        );
+        return;
+      }
+      if (
+        composerImages.length > 0 ||
+        composerFiles.length > 0 ||
+        composerTerminalContexts.length > 0 ||
+        composerPreviewAnnotations.length > 0 ||
+        composerReviewComments.length > 0 ||
+        composerThreadContexts.length > 0 ||
+        composerEnvironmentContexts.length > 0 ||
+        replyTo !== null ||
+        directAnnotation !== undefined
+      ) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: m(msg("Subagent messages support text only")),
+            description: m(
+              msg(
+                "Remove attachments, replies, or attached context before starting a subagent with ^preset.",
+              ),
+            ),
+          }),
+        );
+        return;
+      }
+      if (resolvedPreset.taskText.length === 0) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: m(msg("Add a message for the subagent")),
+            description: m(msg("Write instructions after ^preset to send to the subagent.")),
+          }),
+        );
+        return;
+      }
+      const presetProviderEntry = providerInstanceEntries.find(
+        (entry) => entry.instanceId === resolvedPreset.preset.modelSelection.instanceId,
+      );
+      if (!presetProviderEntry || !isProviderInstancePickerReady(presetProviderEntry)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: m(msg("Model preset unavailable")),
+            description: m(
+              msg("The provider for preset {name} is currently unavailable.", {
+                name: resolvedPreset.preset.name,
+              }),
+            ),
+          }),
+        );
+        return;
+      }
+      sendInFlightRef.current = true;
+      const subagentResult = await startDelegatedSubagent({
+        environmentId,
+        input: {
+          threadId: activeThread.id,
+          task: resolvedPreset.taskText,
+          title: resolvedPreset.preset.name,
+          modelSelection: resolvedPreset.preset.modelSelection,
+          runtimeMode,
+          interactionMode: DEFAULT_INTERACTION_MODE,
+          creationSource: "web",
+        },
+      });
+      sendInFlightRef.current = false;
+      if (subagentResult._tag === "Failure") {
+        if (isAtomCommandInterrupted(subagentResult)) return;
+        const message =
+          thrownErrorMessage(squashAtomCommandFailure(subagentResult), m) ??
+          m(msg("Failed to start subagent."));
+        setThreadError(activeThread.id, message);
+        return;
+      }
+      setThreadError(activeThread.id, null);
+      clearComposerDraftContent(composerDraftTarget);
+      if (currentRouteThreadKeyRef.current === routeThreadKey) {
+        promptRef.current = "";
+        composerRef.current?.resetCursorState();
+      }
+      return;
+    }
+
+    let effectivePromptForSend = promptForSend;
+    let effectiveProvider = ctxSelectedProvider;
+    let effectiveModel = ctxSelectedModel;
+    let effectiveProviderModels = ctxSelectedProviderModels;
+    let effectivePromptEffort = ctxSelectedPromptEffort;
+    let effectiveModelSelection = ctxSelectedModelSelection;
+    let switchedPresetName: string | null = null;
+
+    if (resolvedPreset.kind === "model-switch") {
+      const presetProviderEntry = providerInstanceEntries.find(
+        (entry) => entry.instanceId === resolvedPreset.preset.modelSelection.instanceId,
+      );
+      if (!presetProviderEntry || !isProviderInstancePickerReady(presetProviderEntry)) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: m(msg("Model preset unavailable")),
+            description: m(
+              msg("The provider for preset {name} is currently unavailable.", {
+                name: resolvedPreset.preset.name,
+              }),
+            ),
+          }),
+        );
+        return;
+      }
+      effectivePromptForSend = resolvedPreset.cleanedPrompt;
+      effectiveModelSelection = resolvedPreset.preset.modelSelection;
+      effectiveProvider = presetProviderEntry.driverKind;
+      effectiveModel = resolvedPreset.preset.modelSelection.model;
+      effectiveProviderModels = presetProviderEntry.models;
+      effectivePromptEffort = null;
+      switchedPresetName = resolvedPreset.preset.name;
+    }
+
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
       expiredTerminalContextCount,
       hasSendableContent,
     } = deriveComposerSendState({
-      prompt: promptForSend,
+      prompt: effectivePromptForSend,
       imageCount: composerImages.length + composerFiles.length,
       terminalContexts: composerTerminalContexts,
       elementContextCount:
@@ -875,8 +1049,56 @@ export function useComposerSend(input: ComposerSendInput) {
         composerThreadContexts.length +
         composerEnvironmentContexts.length,
     });
+
+    if (switchedPresetName !== null && !hasSendableContent) {
+      if (isServerThread) {
+        sendInFlightRef.current = true;
+        const switchResult = await setThreadModelSelection({
+          environmentId,
+          input: {
+            threadId: activeThread.id,
+            modelSelection: effectiveModelSelection,
+          },
+        });
+        sendInFlightRef.current = false;
+        if (switchResult._tag === "Failure") {
+          if (isAtomCommandInterrupted(switchResult)) return;
+          const message =
+            thrownErrorMessage(squashAtomCommandFailure(switchResult), m) ??
+            m(msg("Failed to switch model."));
+          setThreadError(activeThread.id, message);
+          return;
+        }
+        setComposerDraftModelSelection(composerDraftTarget, effectiveModelSelection, {
+          explicit: true,
+          replaceOptions: true,
+        });
+        releaseComposerDraftModelSelection(
+          scopeThreadRef(environmentId, activeThread.id),
+          effectiveModelSelection,
+        );
+      } else {
+        setComposerDraftModelSelection(composerDraftTarget, effectiveModelSelection, {
+          explicit: true,
+          replaceOptions: true,
+        });
+      }
+      setThreadError(activeThread.id, null);
+      clearComposerDraftContent(composerDraftTarget);
+      if (currentRouteThreadKeyRef.current === routeThreadKey) {
+        promptRef.current = "";
+        composerRef.current?.resetCursorState();
+      }
+      toastManager.add({
+        type: "success",
+        title: m(msg("Switched model to {name}", { name: switchedPresetName })),
+        timeout: 3_000,
+      });
+      return;
+    }
+
     const feedbackCommand =
-      ctxSelectedProvider === "codex" &&
+      effectiveProvider === "codex" &&
       composerImages.length === 0 &&
       composerFiles.length === 0 &&
       sendableComposerTerminalContexts.length === 0 &&
@@ -985,7 +1207,7 @@ export function useComposerSend(input: ComposerSendInput) {
     }
     const threadIdForSend = activeThread.id;
     const sendSnapshot = snapshotComposerSend({
-      prompt: promptForSend,
+      prompt: effectivePromptForSend,
       images: composerImages,
       files: composerFiles,
       terminalContexts: composerTerminalContexts,
@@ -1058,10 +1280,10 @@ export function useComposerSend(input: ComposerSendInput) {
     const messageIdForSend = newMessageId();
     const messageCreatedAt = new Date().toISOString();
     const outgoingMessageText = formatOutgoingPrompt({
-      provider: ctxSelectedProvider,
-      model: ctxSelectedModel,
-      models: ctxSelectedProviderModels,
-      effort: ctxSelectedPromptEffort,
+      provider: effectiveProvider,
+      model: effectiveModel,
+      models: effectiveProviderModels,
+      effort: effectivePromptEffort,
       text: messageTextForSend || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
     });
     if (
@@ -1422,6 +1644,12 @@ export function useComposerSend(input: ComposerSendInput) {
       : null;
     // Keep new-thread flows from reusing this draft while attachments and worktree setup settle.
     if (sentDraftThreadRef) markPromotedDraftThreadByRef(sentDraftThreadRef);
+    if (switchedPresetName !== null) {
+      setComposerDraftModelSelection(composerDraftTarget, effectiveModelSelection, {
+        explicit: true,
+        replaceOptions: true,
+      });
+    }
     clearComposerDraftContent(composerDraftTarget);
     // The prompt ref and cursor belong to the thread on screen, which may no longer be this one.
     if (currentRouteThreadKeyRef.current === routeThreadKey) {
@@ -1438,9 +1666,9 @@ export function useComposerSend(input: ComposerSendInput) {
       m,
     );
     const threadCreateModelSelection = createModelSelection(
-      ctxSelectedModelSelection.instanceId,
-      ctxSelectedModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
-      ctxSelectedModelSelection.options,
+      effectiveModelSelection.instanceId,
+      effectiveModel || activeProjectDefaultModelSelection?.model || DEFAULT_MODEL,
+      effectiveModelSelection.options,
     );
 
     let failure: AtomCommandResult<unknown, unknown> | null = null;
@@ -1484,7 +1712,7 @@ export function useComposerSend(input: ComposerSendInput) {
             attachments: [],
             idleCompaction: "onReturn",
           },
-          modelSelection: ctxSelectedModelSelection,
+          modelSelection: effectiveModelSelection,
           runtimeMode,
           interactionMode: DEFAULT_INTERACTION_MODE,
         },
@@ -1497,6 +1725,10 @@ export function useComposerSend(input: ComposerSendInput) {
     let backgroundDraftOpened = false;
     let turnStartSucceeded = false;
     if (failure === null && turnAttachmentsResult._tag === "Success") {
+      const draftActiveWorkspace =
+        isLocalDraftThread && draftId !== null
+          ? (useComposerDraftStore.getState().getDraftSession(draftId)?.activeWorkspace ?? null)
+          : null;
       const bootstrap =
         isLocalDraftThread || baseBranchForWorktree
           ? {
@@ -1510,6 +1742,7 @@ export function useComposerSend(input: ComposerSendInput) {
                       interactionMode: DEFAULT_INTERACTION_MODE,
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
+                      ...(draftActiveWorkspace ? { activeWorkspace: draftActiveWorkspace } : {}),
                       createdAt: activeThread.createdAt,
                     },
                   }
@@ -1554,7 +1787,7 @@ export function useComposerSend(input: ComposerSendInput) {
               ),
             }),
           },
-          modelSelection: ctxSelectedModelSelection,
+          modelSelection: effectiveModelSelection,
           titleSeed: title,
           runtimeMode,
           interactionMode: DEFAULT_INTERACTION_MODE,
@@ -1592,6 +1825,12 @@ export function useComposerSend(input: ComposerSendInput) {
         failure = startResult;
       } else {
         turnStartSucceeded = true;
+        if (switchedPresetName !== null && isServerThread) {
+          releaseComposerDraftModelSelection(
+            scopeThreadRef(environmentId, threadIdForSend),
+            effectiveModelSelection,
+          );
+        }
         if (checkoutPullRequestUrl) {
           linkCheckoutPullRequest(
             scopeThreadRef(environmentId, threadIdForSend),
@@ -1641,6 +1880,12 @@ export function useComposerSend(input: ComposerSendInput) {
     }
 
     if (failure !== null) {
+      if (switchedPresetName !== null) {
+        setComposerDraftModelSelection(composerDraftTarget, ctxSelectedModelSelection, {
+          explicit: true,
+          replaceOptions: true,
+        });
+      }
       if (isLocalDraftThread && draftId && draftThread) {
         restoreFailedDraftThread(
           draftId,

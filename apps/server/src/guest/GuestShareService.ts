@@ -39,9 +39,11 @@ import * as PayloadSigner from "../auth/PayloadSigner.ts";
 import {
   attachmentFileExtension,
   createAttachmentId,
+  parseThreadSegmentFromAttachmentId,
   resolveAttachmentPath,
   resolveAttachmentPathById,
   threadHtmlRenderAttachmentIds,
+  toSafeThreadAttachmentSegment,
 } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { CloudManagedEndpointRuntime } from "../cloud/ManagedEndpointRuntime.ts";
@@ -656,6 +658,20 @@ const make = Effect.gen(function* () {
 
   const render = Effect.fn("GuestShareService.render")(function* (session: string, itemId: string) {
     const { item } = yield* threadItem(session, itemId);
+    if (item.type === "html_render") {
+      const segment = toSafeThreadAttachmentSegment(item.threadId);
+      const attachmentId =
+        segment !== null &&
+        parseThreadSegmentFromAttachmentId(item.htmlRender.attachmentId) === segment
+          ? item.htmlRender.attachmentId
+          : undefined;
+      const path =
+        attachmentId === undefined
+          ? null
+          : resolveAttachmentPathById({ attachmentsDir, attachmentId });
+      if (path === null) return yield* unavailable;
+      return { path, title: item.htmlRender.title };
+    }
     if (item.type !== "dynamic_tool") return yield* unavailable;
     const reference = htmlRenderFromToolItem(item);
     const [attachmentId] = threadHtmlRenderAttachmentIds(item.threadId, [item]);

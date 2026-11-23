@@ -12,6 +12,7 @@ import {
   AgentFeedbackRequestStatus,
   AgentFeedbackTrace,
 } from "./agentFeedback.ts";
+import { ThreadActiveWorkspace } from "./agentWorkspace.ts";
 import {
   CheckpointId,
   CheckpointRef,
@@ -507,6 +508,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  /** Active Agent Workspace for this thread, overriding the effective working root without mutating worktreePath. */
+  activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -1889,6 +1892,37 @@ const OrchestrationV2FeedbackRequestFields = {
   feedbackStatus: AgentFeedbackRequestStatus,
 } as const;
 
+export const OrchestrationV2HtmlRenderReference = Schema.Struct({
+  attachmentId: TrimmedNonEmptyString,
+  title: TrimmedNonEmptyString,
+  height: Schema.Number,
+  heights: Schema.optionalKey(Schema.Array(Schema.Tuple([Schema.Int, Schema.Int]))),
+});
+export type OrchestrationV2HtmlRenderReference = typeof OrchestrationV2HtmlRenderReference.Type;
+
+const OrchestrationV2HtmlRenderFields = {
+  type: Schema.Literal("html_render"),
+  htmlRender: OrchestrationV2HtmlRenderReference,
+} as const;
+
+const OrchestrationV2SentMessageFields = {
+  type: Schema.Literal("sent_message"),
+  text: Schema.String,
+} as const;
+
+const OrchestrationV2WorkspaceHandoffFields = {
+  type: Schema.Literal("workspace_handoff"),
+  fromWorkspace: Schema.NullOr(ThreadActiveWorkspace),
+  toWorkspace: Schema.NullOr(ThreadActiveWorkspace),
+} as const;
+
+const OrchestrationV2PreviewRecordingFields = {
+  type: Schema.Literal("preview_recording"),
+  attachmentId: TrimmedNonEmptyString,
+  mimeType: TrimmedNonEmptyString,
+  sizeBytes: NonNegativeInt,
+} as const;
+
 export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2096,6 +2130,22 @@ export const OrchestrationV2TurnItem = Schema.Union([
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
     ...OrchestrationV2FeedbackRequestFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2HtmlRenderFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2SentMessageFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2WorkspaceHandoffFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemBaseFields,
+    ...OrchestrationV2PreviewRecordingFields,
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemBaseFields,
@@ -2401,6 +2451,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  /** Active Agent Workspace for this thread, overriding the effective working root without mutating worktreePath. */
+  activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -2994,6 +3046,22 @@ export const OrchestrationV2TurnItemJson = Schema.Union([
   }),
   Schema.Struct({
     ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2HtmlRenderFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2SentMessageFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2WorkspaceHandoffFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
+    ...OrchestrationV2PreviewRecordingFields,
+  }),
+  Schema.Struct({
+    ...OrchestrationV2TurnItemJsonBaseFields,
     type: Schema.Literal("subagent"),
     subagentId: NodeId,
     origin: Schema.Literals(["provider_native", "app_owned"]),
@@ -3310,6 +3378,7 @@ export const OrchestrationV2Command = Schema.Union([
     interactionMode: ProviderInteractionMode,
     branch: Schema.NullOr(TrimmedNonEmptyString),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+    activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
     /** Only the server sets this; a client's thread.create never carries one. */
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
     /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */
@@ -3466,6 +3535,7 @@ export const OrchestrationV2Command = Schema.Union([
     regenerateTitle: Schema.optional(Schema.Boolean),
     branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     worktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
+    activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
     expectedWorktreePath: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     expectedBranch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
     /** A message queued in the same commit, so a workspace change cannot settle the thread first. */
@@ -3768,8 +3838,8 @@ export const OrchestrationV2Command = Schema.Union([
     ...OrchestrationV2CreationFields,
     commandId: CommandId,
     parentThreadId: ThreadId,
-    parentRunId: RunId,
-    parentNodeId: NodeId,
+    parentRunId: Schema.optional(RunId),
+    parentNodeId: Schema.optional(NodeId),
     task: TrimmedNonEmptyString,
     title: Schema.optional(TrimmedNonEmptyString),
     modelSelection: ModelSelection,
@@ -4036,6 +4106,38 @@ const OrchestrationV2InternalCommand = Schema.Union([
     conversationTrace: Schema.optionalKey(AgentFeedbackTrace),
     feedbackStatus: AgentFeedbackRequestStatus,
   }),
+  /** Server-authoritative record of an HTML page published via `html_render`. */
+  Schema.Struct({
+    type: Schema.Literal("html_render.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: Schema.NullOr(RunId),
+    nodeId: Schema.NullOr(NodeId),
+    turnItemId: TurnItemId,
+    htmlRender: OrchestrationV2HtmlRenderReference,
+  }),
+  /** Server-authoritative record of a mid-turn Markdown message sent via `send_to_user`. */
+  Schema.Struct({
+    type: Schema.Literal("sent_message.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: Schema.NullOr(RunId),
+    nodeId: Schema.NullOr(NodeId),
+    turnItemId: TurnItemId,
+    text: Schema.String,
+  }),
+  /** Server-authoritative ownership record for a recording saved by `preview_recording_stop`. */
+  Schema.Struct({
+    type: Schema.Literal("preview_recording.record"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    runId: Schema.NullOr(RunId),
+    nodeId: Schema.NullOr(NodeId),
+    turnItemId: TurnItemId,
+    attachmentId: TrimmedNonEmptyString,
+    mimeType: TrimmedNonEmptyString,
+    sizeBytes: NonNegativeInt,
+  }),
   /**
    * Records or updates a link an agent asked the user to make. Internal so no
    * client can mark a request linked without the link being made.
@@ -4160,6 +4262,7 @@ export const OrchestrationV2ThreadLaunchInput = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy,
+  activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
   initialMessage: Schema.optional(
     Schema.Struct({
       messageId: Schema.optional(MessageId),

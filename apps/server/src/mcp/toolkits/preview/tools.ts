@@ -21,6 +21,7 @@ import {
   PreviewAutomationTabTargetInput,
   PreviewAutomationWaitForInput,
 } from "@t3tools/contracts";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
 import * as FileSystem from "effect/FileSystem";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
@@ -226,7 +227,12 @@ const PreviewRecordingStopTool = safeBrowserTool(
     parameters: PreviewAutomationTabTargetInput,
     success: Schema.Struct({ ...PreviewAutomationRecordingArtifact.fields, ...presentationFields }),
     failure: PreviewToolFailure,
-    dependencies: [...dependencies, FileSystem.FileSystem, ServerConfig.ServerConfig],
+    dependencies: [
+      ...dependencies,
+      FileSystem.FileSystem,
+      ServerConfig.ServerConfig,
+      SecureRandom.SecureRandom,
+    ],
   }).annotate(Tool.Title, "Stop browser recording"),
 );
 

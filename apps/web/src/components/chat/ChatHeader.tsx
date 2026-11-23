@@ -2,6 +2,7 @@ import {
   AuthOrchestrationOperateScope,
   type EnvironmentId,
   type ScopedThreadRef,
+  type ThreadActiveWorkspace,
   type ThreadId,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
@@ -44,6 +45,8 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { GuestShareIndicator } from "./GuestShareControls";
+import { ThreadWorkspaceSwitcher } from "./ThreadWorkspaceSwitcher";
+import type { DraftId } from "../../composerDraftStore";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -51,7 +54,9 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   activeThreadLinkOrigin?: string | null | undefined;
   isServerThread: boolean;
+  draftId?: DraftId | undefined;
   activeProject: EnvironmentProject | null;
+  activeWorkspace?: ThreadActiveWorkspace | null | undefined;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
@@ -76,7 +81,9 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   activeThreadLinkOrigin,
   isServerThread,
+  draftId,
   activeProject,
+  activeWorkspace = null,
   parentThreadLink,
   onOpenThread,
   rightPanelOpen,
@@ -295,6 +302,14 @@ export const ChatHeader = memo(function ChatHeader({
             </WorkspaceBreadcrumbSeparator>
           </>
         ) : null}
+        <ThreadWorkspaceSwitcher
+          environmentId={activeThreadEnvironmentId}
+          threadId={activeThreadId}
+          isServerThread={isServerThread}
+          draftId={draftId}
+          activeWorkspace={activeWorkspace}
+          variant="header"
+        />
         {parentThreadLink ? (
           <>
             <WorkspaceBreadcrumbItem>

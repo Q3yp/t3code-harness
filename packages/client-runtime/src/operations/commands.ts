@@ -154,6 +154,7 @@ export interface UpdateThreadMetadataInput extends ThreadCommandInput {
   readonly modelSelection?: ModelSelection;
   readonly branch?: string | null;
   readonly worktreePath?: string | null;
+  readonly activeWorkspace?: import("@t3tools/contracts").ThreadActiveWorkspace | null;
   readonly regenerateTitle?: boolean;
   readonly linkedPullRequest?: ThreadLinkedPullRequest | null;
   readonly expectedEmpty?: boolean;
@@ -167,6 +168,14 @@ export interface SetThreadInteractionModeInput extends ThreadCommandInput {
   readonly interactionMode: ProviderInteractionMode;
 }
 
+export interface StartDelegatedSubagentInput extends ThreadCommandInput {
+  readonly task: string;
+  readonly title?: string;
+  readonly modelSelection: ModelSelection;
+  readonly runtimeMode: RuntimeMode;
+  readonly interactionMode: ProviderInteractionMode;
+}
+
 interface StartThreadBootstrap {
   readonly createThread?: {
     readonly projectId: ProjectId;
@@ -176,6 +185,7 @@ interface StartThreadBootstrap {
     readonly interactionMode: ProviderInteractionMode;
     readonly branch: string | null;
     readonly worktreePath: string | null;
+    readonly activeWorkspace?: import("@t3tools/contracts").ThreadActiveWorkspace | null;
     readonly createdAt: string;
   };
   readonly prepareWorktree?: {
@@ -721,6 +731,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
       input.title !== undefined ||
       input.branch !== undefined ||
       input.worktreePath !== undefined ||
+      input.activeWorkspace !== undefined ||
       input.regenerateTitle !== undefined ||
       input.linkedPullRequest !== undefined ||
       input.limitRecovery !== undefined
@@ -733,6 +744,7 @@ export const updateThreadMetadata = Effect.fn("EnvironmentCommands.updateThreadM
         ...(input.title === undefined ? {} : { title: input.title }),
         ...(input.branch === undefined ? {} : { branch: input.branch }),
         ...(input.worktreePath === undefined ? {} : { worktreePath: input.worktreePath }),
+        ...(input.activeWorkspace === undefined ? {} : { activeWorkspace: input.activeWorkspace }),
         ...(input.expectedEmpty === true ? { expectedEmpty: true } : {}),
         ...(input.regenerateTitle === undefined ? {} : { regenerateTitle: input.regenerateTitle }),
         ...(input.linkedPullRequest === undefined
@@ -770,6 +782,24 @@ export const setThreadInteractionMode = Effect.fn("EnvironmentCommands.setThread
       commandId: yield* allocateCommandId(input),
       threadId: input.threadId,
       interactionMode: input.interactionMode,
+    });
+  },
+);
+
+export const startDelegatedSubagent = Effect.fn("EnvironmentCommands.startDelegatedSubagent")(
+  function* (input: StartDelegatedSubagentInput) {
+    return yield* dispatch({
+      type: "delegated_task.request",
+      createdBy: "user",
+      creationSource: input.creationSource ?? "web",
+      commandId: yield* allocateCommandId(input),
+      parentThreadId: input.threadId,
+      task: input.task,
+      ...(input.title === undefined ? {} : { title: input.title }),
+      modelSelection: input.modelSelection,
+      runtimeMode: input.runtimeMode,
+      interactionMode: input.interactionMode,
+      completionWake: "always",
     });
   },
 );
@@ -836,6 +866,9 @@ export const startThreadTurn = Effect.fn("EnvironmentCommands.startThreadTurn")(
       runtimeMode: input.runtimeMode,
       interactionMode: input.interactionMode,
       workspaceStrategy,
+      ...(bootstrap?.activeWorkspace === undefined
+        ? {}
+        : { activeWorkspace: bootstrap.activeWorkspace }),
       initialMessage: {
         messageId: input.message.messageId,
         text: input.message.text,

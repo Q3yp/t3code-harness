@@ -35,6 +35,7 @@ import {
   type OrchestrationV2Subagent,
   type ProviderInstanceId,
   type ServerProvider,
+  type ThreadActiveWorkspace,
   type ThreadId,
   type EnvironmentId,
   type NodeId,
@@ -49,6 +50,7 @@ import {
   ArrowRightIcon,
   EraserIcon,
   GitForkIcon,
+  LayersIcon,
   MessageSquareIcon,
 } from "lucide-react";
 
@@ -102,6 +104,11 @@ export function V2LifecycleRow(props: {
         endpoints={resolveHandoffEndpoints(item, props.runs)}
         failed={item.status === "failed"}
       />
+    );
+  }
+  if (item.type === "workspace_handoff") {
+    return (
+      <WorkspaceHandoffRow fromWorkspace={item.fromWorkspace} toWorkspace={item.toWorkspace} />
     );
   }
   if (item.type === "fork") {
@@ -771,5 +778,58 @@ function HandoffEndpoint(props: {
         {entry?.displayName ?? props.instanceId} · {label}
       </TooltipPopup>
     </Tooltip>
+  );
+}
+
+function WorkspaceHandoffEndpoint(props: { readonly workspace: ThreadActiveWorkspace }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            tabIndex={0}
+            className="inline-flex min-w-0 items-center gap-1 rounded-sm font-medium text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          >
+            <span className="truncate">{props.workspace.name}</span>
+          </span>
+        }
+      />
+      <TooltipPopup>{props.workspace.path}</TooltipPopup>
+    </Tooltip>
+  );
+}
+
+function WorkspaceHandoffRow(props: {
+  readonly fromWorkspace: ThreadActiveWorkspace | null;
+  readonly toWorkspace: ThreadActiveWorkspace | null;
+}) {
+  const gt = useGT();
+  const label =
+    props.toWorkspace === null
+      ? gt("Workspace cleared")
+      : props.fromWorkspace === null
+        ? gt("Workspace activated")
+        : gt("Workspace switched");
+  return (
+    <TimelineSystemDivider
+      label={label}
+      icon={LayersIcon}
+      showDetailSeparator={false}
+      detail={
+        <span className="inline-flex min-w-0 flex-wrap items-center justify-center gap-1.5">
+          {props.fromWorkspace !== null ? (
+            <>
+              <WorkspaceHandoffEndpoint workspace={props.fromWorkspace} />
+              <ArrowRightIcon aria-hidden="true" className="size-3 shrink-0" />
+            </>
+          ) : null}
+          {props.toWorkspace !== null ? (
+            <WorkspaceHandoffEndpoint workspace={props.toWorkspace} />
+          ) : (
+            <span className="font-medium text-muted-foreground">{gt("Project root")}</span>
+          )}
+        </span>
+      }
+    />
   );
 }

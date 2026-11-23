@@ -244,5 +244,19 @@ export function createFilesystemEnvironmentAtoms<R, E>(
       label: "environment-data:workspace:add-task-folder-repository",
       tag: WS_METHODS.workspaceAddTaskFolderRepository,
     }),
+    /** Live Agent Workspaces catalog (names, descriptions, paths, and errors) for an environment. */
+    listAgentWorkspaces: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:agent-workspaces:list",
+      tag: WS_METHODS.agentWorkspacesList,
+      staleTimeMs: 0,
+    }),
+    registerAgentWorkspace: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:agent-workspaces:register",
+      tag: WS_METHODS.agentWorkspacesRegister,
+    }),
+    unregisterAgentWorkspace: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:agent-workspaces:unregister",
+      tag: WS_METHODS.agentWorkspacesUnregister,
+    }),
   };
 }

@@ -395,6 +395,7 @@ export function applyServerSettingsPatch(
     setModelsHidden,
     setProviderModelOrder,
     providerModelPreferences,
+    modelPresets: modelPresetsPatch,
     automaticGitFetchInterval,
     providerHealthRefreshInterval,
     backgroundActivityProfile,
@@ -506,6 +507,20 @@ export function applyServerSettingsPatch(
     ...next,
     favorites,
     providerModelPreferences: nextModelPreferences,
+    ...(modelPresetsPatch !== undefined
+      ? {
+          modelPresets: (() => {
+            const byLower = new Map<string, (typeof modelPresetsPatch)[number]>();
+            for (const preset of modelPresetsPatch) {
+              const key = preset.name.trim().toLowerCase();
+              if (!key) continue;
+              if (byLower.has(key)) byLower.delete(key);
+              byLower.set(key, preset);
+            }
+            return [...byLower.values()];
+          })(),
+        }
+      : {}),
     ...(worktreeCleanupPatch === undefined
       ? {}
       : {

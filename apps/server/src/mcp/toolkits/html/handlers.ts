@@ -1,10 +1,11 @@
-import { OrchestratorMcpFailure } from "@t3tools/contracts";
+import { OrchestratorMcpFailure, TurnItemId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 
 import * as HtmlRender from "../../../htmlRender/HtmlRender.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
-import { loadCaller } from "../../threadAccess.ts";
+import { dispatchFailure, loadCaller, newCommandId } from "../../threadAccess.ts";
 import { HtmlPreviewToolkit, HtmlRenderToolkit, type HtmlToolkit } from "./tools.ts";
 
 const INVALID_PAGE_ERRORS = new Set([
@@ -72,10 +73,23 @@ const handlers = {
       const scope = yield* McpInvocationContext.McpInvocationContext;
       const { thread } = yield* McpInvocationContext.requireThreadScope(scope, "html_render");
       const htmlRender = yield* HtmlRender.HtmlRender;
+      const threads = yield* ThreadManagementService.ThreadManagementService;
       const source = yield* pageSource(input);
       const reference = yield* htmlRender
         .publish({ ...source, threadId: thread.threadId, title: input.title, height: input.height })
         .pipe(Effect.mapError(toFailure));
+      const commandId = yield* newCommandId();
+      yield* threads
+        .dispatch({
+          type: "html_render.record",
+          commandId,
+          threadId: thread.threadId,
+          runId: null,
+          nodeId: null,
+          turnItemId: TurnItemId.make(`turn-item:html-render:${commandId}`),
+          htmlRender: reference,
+        })
+        .pipe(Effect.mapError(dispatchFailure));
       return {
         htmlRender: reference,
         message:

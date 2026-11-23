@@ -21,6 +21,7 @@ import {
   type PreviewAutomationSnapshotMetadata,
   type PreviewAutomationStatus,
   type PreviewTabId,
+  TurnItemId,
 } from "@t3tools/contracts";
 
 import {
@@ -31,9 +32,11 @@ import {
 } from "../../../attachmentStore.ts";
 import { resolveAttachmentRelativePath } from "../../../attachmentPaths.ts";
 import * as ServerConfig from "../../../config.ts";
+import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import * as PreviewAutomationBroker from "../../PreviewAutomationBroker.ts";
+import { dispatchFailure, newCommandId } from "../../threadAccess.ts";
 import { PreviewSnapshotToolkit, PreviewStandardToolkit, PreviewToolkit } from "./tools.ts";
 
 /** Whether a preview the agent
@@ -264,6 +267,7 @@ const handlers = {
   preview_recording_stop: McpToolAccess.actsAsCaller((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.requireThreadMcpCapability("preview");
+      const threads = yield* ThreadManagementService.ThreadManagementService;
       const { tabId, ...operationInput } = input;
       const response = yield* invoke<unknown>(
         "recordingStop",
@@ -272,6 +276,20 @@ const handlers = {
         tabId,
       );
       const artifact = yield* claimPreviewRecording(scope.thread.threadId, response.result);
+      const commandId = yield* newCommandId();
+      yield* threads
+        .dispatch({
+          type: "preview_recording.record",
+          commandId,
+          threadId: scope.thread.threadId,
+          runId: null,
+          nodeId: null,
+          turnItemId: TurnItemId.make(`turn-item:preview-recording:${commandId}`),
+          attachmentId: artifact.id,
+          mimeType: artifact.mimeType,
+          sizeBytes: artifact.sizeBytes,
+        })
+        .pipe(Effect.mapError(dispatchFailure));
       return { ...artifact, ...(response.toolIcon ? { toolIcon: response.toolIcon } : {}) };
     }),
   ),

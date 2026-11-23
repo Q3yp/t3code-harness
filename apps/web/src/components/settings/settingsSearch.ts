@@ -19,6 +19,7 @@ import type { ResolvedSettingsScope } from "./settingsScope";
 
 export type SettingsPath =
   | "/settings/projects"
+  | "/settings/workspaces"
   | "/settings/general"
   | "/settings/diagnostics"
   | "/settings/voice"
@@ -99,6 +100,7 @@ export interface SettingsSearchAvailability {
 export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/diagnostics": msg("Diagnostics"),
   "/settings/projects": msg("Projects"),
+  "/settings/workspaces": msg("Workspaces"),
   "/settings/general": msg("General"),
   "/settings/appearance": msg("Appearance"),
   "/settings/chat": msg("Chat"),
@@ -164,7 +166,12 @@ const ALL_SETTINGS_NAV_GROUPS: ReadonlyArray<SettingsNavGroup> = [
   },
   {
     heading: msg("Code"),
-    paths: ["/settings/projects", "/settings/source-control", "/settings/worktrees"],
+    paths: [
+      "/settings/workspaces",
+      "/settings/projects",
+      "/settings/source-control",
+      "/settings/worktrees",
+    ],
   },
   {
     heading: msg("Connections"),
@@ -1079,6 +1086,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "model-presets",
+    title: msg("Model presets"),
+    to: "/settings/providers",
+    searchTerms: [msg("preset alias model reasoning effort switch subagent @ ^")],
+    providerSettingsOnly: true,
+  },
+  {
     id: "usage-providers",
     title: msg("Usage providers"),
     to: "/settings/providers",
@@ -1519,6 +1533,7 @@ const SEARCH_ITEMS_BY_ID = new Map(SETTINGS_SEARCH_ITEMS.map((item) => [item.id,
 const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScope | null>> = {
   "/settings/diagnostics": "environment",
   "/settings/projects": "project",
+  "/settings/workspaces": "environment",
   "/settings/general": null,
   "/settings/voice": null,
   "/settings/appearance": null,

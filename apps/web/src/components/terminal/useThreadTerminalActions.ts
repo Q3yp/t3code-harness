@@ -41,6 +41,8 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
       : null;
   const project = useProject(projectRef);
   const threadWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null;
+  const threadActiveWorkspacePath =
+    serverThread?.activeWorkspace?.path ?? draftThread?.activeWorkspace?.path ?? null;
   const knownSessions = useKnownTerminalSessions({
     environmentId: threadRef?.environmentId ?? null,
     threadId: threadRef?.threadId ?? null,
@@ -75,11 +77,13 @@ export function useThreadTerminalActions(threadRef: ScopedThreadRef | null) {
   const defaultLaunchLocation = (): TerminalLaunchLocation | null =>
     project
       ? {
-          cwd: projectScriptCwd({
-            project: { cwd: project.workspaceRoot },
-            worktreePath: threadWorktreePath,
-          }),
-          worktreePath: threadWorktreePath,
+          cwd:
+            threadActiveWorkspacePath ??
+            projectScriptCwd({
+              project: { cwd: project.workspaceRoot },
+              worktreePath: threadWorktreePath,
+            }),
+          worktreePath: threadActiveWorkspacePath ? null : threadWorktreePath,
         }
       : null;
 

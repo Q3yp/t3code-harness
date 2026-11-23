@@ -166,7 +166,10 @@ import {
 } from "@t3tools/provider-core/server/subagentProjection";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
-import { buildWorkspaceInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
+import {
+  buildAgentWorkspacesInstructions,
+  buildWorkspaceInstructions,
+} from "@t3tools/provider-core/server/runtimeInstructions";
 
 const CODEX_PROVIDER = ProviderDriverKind.make("codex");
 const CODEX_CAPACITY_MAX_RETRIES = 5;
@@ -937,10 +940,25 @@ export const buildCodexTurnStartParams = Effect.fn("CodexAdapterV2.buildCodexTur
         : undefined;
     // Its own entry, so the folder list reaches the model without T3 Code's MCP tools too.
     const workspaceInstructions = buildWorkspaceInstructions(input.runtimePolicy);
+    const agentWorkspaceInstructions = buildAgentWorkspacesInstructions(input.runtimePolicy);
     const workspaceContext =
-      workspaceInstructions === ""
+      workspaceInstructions === "" && agentWorkspaceInstructions === ""
         ? undefined
-        : { t3_code_workspace: { kind: "application" as const, value: workspaceInstructions } };
+        : {
+            ...(workspaceInstructions === ""
+              ? {}
+              : {
+                  t3_code_workspace: { kind: "application" as const, value: workspaceInstructions },
+                }),
+            ...(agentWorkspaceInstructions === ""
+              ? {}
+              : {
+                  t3_code_agent_workspaces: {
+                    kind: "application" as const,
+                    value: agentWorkspaceInstructions,
+                  },
+                }),
+          };
     const additionalContext =
       t3Context === undefined &&
       workspaceContext === undefined &&

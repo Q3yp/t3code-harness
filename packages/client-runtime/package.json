@@ -43,6 +43,10 @@
       "types": "./src/composerModelMentions.ts",
       "default": "./src/composerModelMentions.ts"
     },
+    "./composer-model-presets": {
+      "types": "./src/composerModelPresets.ts",
+      "default": "./src/composerModelPresets.ts"
+    },
     "./contract-labels": {
       "types": "./src/contractLabels.ts",
       "default": "./src/contractLabels.ts"

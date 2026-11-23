@@ -141,6 +141,7 @@ export function citedThreadSnapshot(input: {
     ({ item }) =>
       ((item.type === "assistant_message" || item.type === "user_message") &&
         item.messageId === input.messageId) ||
+      (item.type === "sent_message" && item.id === input.messageId) ||
       (item.type === "dynamic_tool" &&
         item.id === input.messageId &&
         item.status === "completed" &&

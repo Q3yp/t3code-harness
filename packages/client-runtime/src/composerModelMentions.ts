@@ -13,12 +13,16 @@ function mentionSearchQueries(query: string): ReadonlyArray<string> {
   return unhyphenated === spaced ? [spaced] : [spaced, unhyphenated];
 }
 
-/** Returns the models matching an `@` mention, best first. A bare `@` matches none. */
+/** Returns the models matching an `@` mention, best first. A bare `@` matches none unless `allowEmptyQuery` is set. */
 export function rankComposerModelMentions<T>(
   candidates: ReadonlyArray<T>,
   query: string,
   toSearchable: (candidate: T) => ModelPickerSearchableModel,
+  options?: { readonly allowEmptyQuery?: boolean },
 ): T[] {
+  if (options?.allowEmptyQuery === true && query.trim().length === 0) {
+    return candidates.slice(0, COMPOSER_MODEL_MENTION_LIMIT);
+  }
   for (const words of mentionSearchQueries(query)) {
     // Every word must start a word of the model's names. Fuzzy hits would push files out of the `@` menu.
     const tokens = words

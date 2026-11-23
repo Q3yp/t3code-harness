@@ -1,4 +1,5 @@
 import type { ClientSettings } from "@t3tools/contracts/settings";
+import { parseAtMentionQuery } from "@t3tools/client-runtime/composer-model-presets";
 import type {
   AssistantCitation,
   EnvironmentId,
@@ -25,7 +26,12 @@ import {
   type ShortcutMatchContext,
 } from "./keybindings";
 
-export type ComposerTriggerKind = "path" | "pull-request" | "slash-command" | "skill";
+export type ComposerTriggerKind =
+  | "path"
+  | "pull-request"
+  | "slash-command"
+  | "skill"
+  | "subagent-preset";
 export type ComposerSlashCommand = "model" | "side" | "btw" | "clear";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
@@ -46,7 +52,7 @@ export function isPathSuggestionCurrent(
     trigger?.kind === "path" &&
     searchTarget.environmentId === environmentId &&
     searchTarget.cwd === cwd &&
-    searchTarget.query === trigger.query.trim()
+    searchTarget.query === parseAtMentionQuery(trigger.query).query.trim()
   );
 }
 
@@ -149,7 +155,11 @@ export function expandCollapsedComposerCursor(
       expandedCursor += expandedLength;
       continue;
     }
-    if (segment.type === "skill" || segment.type === "model") {
+    if (
+      segment.type === "skill" ||
+      segment.type === "model" ||
+      segment.type === "subagent-preset"
+    ) {
       const expandedLength = segment.source.length;
       if (remaining <= 1) {
         return expandedCursor + (remaining === 0 ? 0 : expandedLength);
@@ -235,7 +245,11 @@ export function collapseExpandedComposerCursor(
       collapsedCursor += 1;
       continue;
     }
-    if (segment.type === "skill" || segment.type === "model") {
+    if (
+      segment.type === "skill" ||
+      segment.type === "model" ||
+      segment.type === "subagent-preset"
+    ) {
       const expandedLength = segment.source.length;
       if (remaining === 0) {
         return collapsedCursor;
@@ -280,6 +294,14 @@ export function detectComposerTrigger(text: string, cursorInput: number): Compos
     return {
       kind: "skill",
       query: token.slice(skillPrefix[0].length),
+      rangeStart: tokenStart,
+      rangeEnd: cursor,
+    };
+  }
+  if (token.startsWith("^") && text.slice(0, tokenStart).trim() === "") {
+    return {
+      kind: "subagent-preset",
+      query: token.slice(1),
       rangeStart: tokenStart,
       rangeEnd: cursor,
     };

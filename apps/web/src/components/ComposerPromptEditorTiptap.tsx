@@ -100,6 +100,7 @@ import {
   surroundSelectionWithMark,
   stepCaretAcrossStyledEdge,
   type IsKnownModel,
+  type IsKnownModelPreset,
   type SkillMeta,
 } from "~/composer-rich-text-doc";
 import {
@@ -131,6 +132,7 @@ import { FileTagChipContent } from "./chat/FileTagChip";
 import { SkillChipPopover, skillPopoverDescription } from "./chat/SkillInlineText";
 import { AssistantCitationChip } from "./chat/AssistantCitationChip";
 import { ModelMentionChip, modelMentionKey, modelMentionKeysAtom } from "./chat/ModelMentionChip";
+import { ModelPresetChip, modelPresetNamesAtom } from "./chat/ModelPresetChip";
 import { getTimelinePageScrollKey } from "./chat/pageScrollController";
 import { ContextChip } from "./ContextChip";
 import {
@@ -397,6 +399,45 @@ const ComposerModelExtension = Node.create({
   },
   addNodeView() {
     return ReactNodeViewRenderer(ComposerModelNodeView);
+  },
+});
+
+function ComposerModelPresetNodeView({ node }: NodeViewProps) {
+  const actions = use(ComposerContextActionsContext);
+  return (
+    <NodeViewWrapper as="span" className={CHIP_NODE_SELECTION_CLASS_NAME}>
+      <ModelPresetChip
+        environmentId={actions.environmentId}
+        presetName={String(node.attrs.presetName)}
+        mode={node.attrs.mode === "subagent" ? "subagent" : "switch"}
+        source={String(node.attrs.source)}
+      />
+    </NodeViewWrapper>
+  );
+}
+
+/** Named `@preset` (switch model on send) or leading `^preset` (subagent) chip. */
+const ComposerModelPresetExtension = Node.create({
+  name: "composer-model-preset",
+  group: "inline",
+  inline: true,
+  atom: true,
+  selectable: true,
+  addAttributes() {
+    return {
+      presetName: { default: "" },
+      mode: { default: "switch" },
+      source: { default: "" },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "span[data-composer-model-preset]" }];
+  },
+  renderHTML({ HTMLAttributes }) {
+    return ["span", { "data-composer-model-preset": "", ...HTMLAttributes }];
+  },
+  addNodeView() {
+    return ReactNodeViewRenderer(ComposerModelPresetNodeView);
   },
 });
 
@@ -889,6 +930,7 @@ function createComposerExtensions(richText: boolean) {
     ComposerMentionExtension,
     ComposerSkillExtension,
     ComposerModelExtension,
+    ComposerModelPresetExtension,
     ComposerCitationExtension,
     ComposerContextReferenceExtension,
     ComposerChipSelectionExtension,
@@ -1031,10 +1073,14 @@ function ComposerPromptEditorTiptapInner(
 
   const { environmentId } = use(ComposerContextActionsContext);
   const modelKeys = useAtomValue(modelMentionKeysAtom(environmentId ?? ""));
+  const presetNames = useAtomValue(modelPresetNamesAtom(environmentId ?? ""));
   // Stable so a skills or models refresh does not rerun the controlled-value effect.
   const skillLabelFor = useStableCallback((name: string) => composerSkillMeta(skills, name));
   const isKnownModel = useStableCallback((instanceId: string, model: string) =>
     modelKeys.has(modelMentionKey(instanceId, model)),
+  );
+  const isKnownModelPreset = useStableCallback((name: string) =>
+    presetNames.has(name.toLowerCase()),
   );
 
   const initialCursor = clampEditorCursor(value, cursor);
@@ -1167,6 +1213,7 @@ function ComposerPromptEditorTiptapInner(
         styling: richText,
         literalText,
         isKnownModel: (instanceId, model) => modelKeys.has(modelMentionKey(instanceId, model)),
+        isKnownModelPreset: (name) => presetNames.has(name.toLowerCase()),
       }),
       editable: !disabled,
       editorProps: {
@@ -1491,19 +1538,28 @@ function ComposerPromptEditorTiptapInner(
             !literalText && importFragment
               ? importPastedComposerText(clipboardData, importFragment)
               : pastedText;
+          const mapBeforePaste = serializeEditorDoc(view.state.doc);
+          const pasteOffset = flatToMarkdown(
+            mapBeforePaste,
+            pmToFlat(mapBeforePaste, view.state.selection.from),
+          );
+          const pasteAtPromptStart = mapBeforePaste.value.slice(0, pasteOffset).trim() === "";
           const tokens = literalText ? [] : collectComposerPromptInlineTokens(`${text}\n`);
           const isChip = (token: (typeof tokens)[number] | undefined) =>
             token?.type === "mention" ||
             (token?.type === "skill" && skillLabelFor(token.value) !== null) ||
-            (token?.type === "model" && isKnownModel(token.instanceId, token.model));
+            (token?.type === "model" && isKnownModel(token.instanceId, token.model)) ||
+            (token?.type === "subagent-preset" &&
+              pasteAtPromptStart &&
+              isKnownModelPreset(token.presetName));
           const lastToken = tokens.at(-1);
           if (isChip(lastToken) && lastToken?.end === text.length) {
             text += " ";
           }
           if (isChip(tokens[0]) && tokens[0]?.start === 0) {
-            const map = serializeEditorDoc(view.state.doc);
-            const offset = flatToMarkdown(map, pmToFlat(map, view.state.selection.from));
-            if (offset > 0 && !/\s/.test(map.value[offset - 1]!)) text = ` ${text}`;
+            if (pasteOffset > 0 && !/\s/.test(mapBeforePaste.value[pasteOffset - 1]!)) {
+              text = ` ${text}`;
+            }
           }
           const { $from } = view.state.selection;
           const lineBefore = $from.parent.textBetween(0, $from.parentOffset, undefined, "\uFFFC");
@@ -1519,7 +1575,15 @@ function ComposerPromptEditorTiptapInner(
             insertMarkdownParagraphs(
               text,
               skillLabelFor,
-              { styling: richText, blocks: !nested, literalText, literalLength, isKnownModel },
+              {
+                styling: richText,
+                blocks: !nested,
+                literalText,
+                literalLength,
+                isKnownModel,
+                isKnownModelPreset,
+                allowSubagentPreset: pasteAtPromptStart,
+              },
               (content) => {
                 editorInstance
                   .chain()
@@ -1558,6 +1622,7 @@ function ComposerPromptEditorTiptapInner(
             updated.state.doc,
             skillLabelFor,
             isKnownModel,
+            isKnownModelPreset,
           ).filter(({ node }) => node.isText);
           if (stale.length > 0) {
             replaceSkillChips(updated, stale);
@@ -1703,7 +1768,12 @@ function ComposerPromptEditorTiptapInner(
     if (previousSnapshot.value !== value) {
       saveCitationDraft(editor, previousSnapshot.value);
       editor.commands.setContent(
-        buildDocJson(value, skillLabelFor, { styling: richText, literalText, isKnownModel }),
+        buildDocJson(value, skillLabelFor, {
+          styling: richText,
+          literalText,
+          isKnownModel,
+          isKnownModelPreset,
+        }),
         {
           emitUpdate: false,
         },
@@ -1751,20 +1821,22 @@ function ComposerPromptEditorTiptapInner(
     richText,
     skillLabelFor,
     isKnownModel,
+    isKnownModelPreset,
     value,
   ]);
 
-  // Reconcile loaded or switched provider skills and models without rebuilding citation node views.
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- replaces skill and model chip nodes in the Tiptap document when the provider skill or model list loads or changes
+  // Reconcile loaded or switched provider skills, models, and presets without rebuilding citation node views.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- replaces skill, model, and preset chip nodes in the Tiptap document when the provider skill, model, or preset list loads or changes
   useEffect(() => {
     if (!editor || literalText) return;
     const replacements = skillChipReplacements(
       editor.state.doc,
       (name) => composerSkillMeta(skills, name),
       (instanceId, model) => modelKeys.has(modelMentionKey(instanceId, model)),
+      (name) => presetNames.has(name.toLowerCase()),
     );
     if (replacements.length > 0) replaceSkillChips(editor, replacements);
-  }, [editor, literalText, modelKeys, skills]);
+  }, [editor, literalText, modelKeys, presetNames, skills]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- keeps the mounted editor's visible text anchored while its DOM width changes
   useLayoutEffect(() => {
@@ -2009,6 +2081,8 @@ function insertMarkdownParagraphs(
     literalText?: boolean;
     literalLength?: number;
     isKnownModel?: IsKnownModel;
+    isKnownModelPreset?: IsKnownModelPreset;
+    allowSubagentPreset?: boolean;
   },
   insertContent: (content: JSONContent[] | JSONContent) => void,
 ): void {

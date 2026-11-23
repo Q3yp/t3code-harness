@@ -1183,6 +1183,18 @@ function turnItemText(item: OrchestrationV2TurnItem): string | null {
       return `Asked the user for ${item.label}: ${item.secretStatus}.`;
     case "feedback_request":
       return `Asked the user to approve a ${item.preview.kind} report about ${item.preview.subject} for the T3 team: ${item.feedbackStatus}.`;
+    case "html_render":
+      return `Rendered HTML page: ${item.htmlRender.title}`;
+    case "sent_message":
+      return item.text;
+    case "workspace_handoff":
+      return item.toWorkspace === null
+        ? `Cleared workspace ${item.fromWorkspace?.name ?? ""}.`.trim()
+        : item.fromWorkspace === null
+          ? `Activated workspace ${item.toWorkspace.name} (${item.toWorkspace.path}).`
+          : `Switched workspace from ${item.fromWorkspace.name} to ${item.toWorkspace.name} (${item.toWorkspace.path}).`;
+    case "preview_recording":
+      return `Saved preview recording ${item.attachmentId}.`;
     case "link_request":
       return item.linkStatus === "linked"
         ? `Linked ${item.linkedLabel ?? item.url ?? "an environment"} (${item.linkedAccess}).`
@@ -1599,14 +1611,16 @@ const make = Effect.gen(function* () {
 
   /** The folder the composer's model picker scans for this thread. */
   const parentWorkspaceCwd = (parent: Pick<OrchestrationV2ThreadProjection, "thread">) =>
-    parent.thread.worktreePath
-      ? Effect.succeed(parent.thread.worktreePath)
-      : projects.getById(parent.thread.projectId).pipe(
-          Effect.map((project) =>
-            Option.getOrUndefined(Option.map(project, ({ workspaceRoot }) => workspaceRoot)),
-          ),
-          Effect.orElseSucceed(() => undefined),
-        );
+    parent.thread.activeWorkspace?.path
+      ? Effect.succeed(parent.thread.activeWorkspace.path)
+      : parent.thread.worktreePath
+        ? Effect.succeed(parent.thread.worktreePath)
+        : projects.getById(parent.thread.projectId).pipe(
+            Effect.map((project) =>
+              Option.getOrUndefined(Option.map(project, ({ workspaceRoot }) => workspaceRoot)),
+            ),
+            Effect.orElseSucceed(() => undefined),
+          );
 
   const scanWorkspace = (instanceId: ServerProvider["instanceId"], cwd: string) =>
     projects
@@ -3331,6 +3345,9 @@ const make = Effect.gen(function* () {
                   interactionMode,
                   branch: parent.thread.branch,
                   worktreePath: parent.thread.worktreePath,
+                  ...(parent.thread.activeWorkspace
+                    ? { activeWorkspace: parent.thread.activeWorkspace }
+                    : {}),
                   ...(parent.thread.linkOrigin === undefined
                     ? {}
                     : { linkOrigin: parent.thread.linkOrigin }),

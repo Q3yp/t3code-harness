@@ -66,6 +66,7 @@ import * as TurnItemPositionStore from "./TurnItemPositionStore.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as FeedbackStore from "../feedback/FeedbackStore.ts";
+import * as AgentWorkspaceService from "../workspace/AgentWorkspaceService.ts";
 import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
 
@@ -81,6 +82,7 @@ const layerWorkspaceFoldersProvided = WorkspaceFolders.layer.pipe(
 const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(layerWorkspaceFoldersProvided),
   Layer.provide(ProjectStore.layer),
+  Layer.provide(AgentWorkspaceService.layer),
 );
 
 const layerEventStoreProvided = EventStore.layerFromOrchestrationEventStore.pipe(

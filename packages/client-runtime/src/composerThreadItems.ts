@@ -41,11 +41,12 @@ export function matchComposerThreadItems(
     query: string;
     /** Recency is measured against this time. */
     now: number;
+    allowEmptyQuery?: boolean;
   },
   resolve: MFunctionType = mFallback,
 ): ComposerThreadItem[] {
   const query = foldSearchQuery(input.query);
-  if (query.length === 0) return [];
+  if (query.length === 0 && input.allowEmptyQuery !== true) return [];
   // Closing an unused side chat deletes it, so only one with a message is offered.
   const isOwnSideChat = (shell: ComposerThreadCandidate) =>
     shell.lineage.sideChat === true &&
@@ -60,30 +61,36 @@ export function matchComposerThreadItems(
       shell.archivedAt === null &&
       (isListedThreadLineage(shell.lineage) || isOwnSideChat(shell)),
   );
-  return rankSearchItems(candidates, (shell, options) =>
-    scoreThreadSearch(query, threadSearchSubject(shell, null), input.now, {
-      ...options,
-      picks: false,
-    }),
-  )
-    .slice(0, COMPOSER_THREAD_RESULT_LIMIT)
-    .map(({ item: shell }) => {
-      const machine =
-        shell.environmentId === input.environmentId
-          ? undefined
-          : input.linkedEnvironments.get(shell.environmentId);
-      return {
-        id: `thread:${shell.environmentId}:${shell.id}`,
-        type: "thread",
-        thread: { environmentId: shell.environmentId, threadId: shell.id },
-        label: shell.title,
-        description: isOwnSideChat(shell)
-          ? resolve(msg("Side chat"))
-          : machine === undefined
-            ? resolve(msg("Thread", { $context: "noun, search result type" }))
-            : resolve(msg("Thread on {machine}", { machine })),
-      };
-    });
+  const ranked =
+    query.length === 0
+      ? [...candidates]
+          .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+          .slice(0, COMPOSER_THREAD_RESULT_LIMIT)
+      : rankSearchItems(candidates, (shell, options) =>
+          scoreThreadSearch(query, threadSearchSubject(shell, null), input.now, {
+            ...options,
+            picks: false,
+          }),
+        )
+          .slice(0, COMPOSER_THREAD_RESULT_LIMIT)
+          .map(({ item }) => item);
+  return ranked.map((shell) => {
+    const machine =
+      shell.environmentId === input.environmentId
+        ? undefined
+        : input.linkedEnvironments.get(shell.environmentId);
+    return {
+      id: `thread:${shell.environmentId}:${shell.id}`,
+      type: "thread",
+      thread: { environmentId: shell.environmentId, threadId: shell.id },
+      label: shell.title,
+      description: isOwnSideChat(shell)
+        ? resolve(msg("Side chat"))
+        : machine === undefined
+          ? resolve(msg("Thread", { $context: "noun, search result type" }))
+          : resolve(msg("Thread on {machine}", { machine })),
+    };
+  });
 }
 
 export interface ComposerEnvironmentCandidate {
@@ -113,11 +120,12 @@ export function matchComposerEnvironmentItems(
     linkedEnvironments: ReadonlyMap<EnvironmentId, string>;
     environmentId: EnvironmentId;
     query: string;
+    allowEmptyQuery?: boolean;
   },
   resolve: MFunctionType = mFallback,
 ): ComposerEnvironmentItem[] {
   const query = input.query.trim().toLowerCase();
-  if (query.length === 0) return [];
+  if (query.length === 0 && input.allowEmptyQuery !== true) return [];
   const paired = new Set(input.environments.map((environment) => environment.environmentId));
   const linkedOnly = Array.from(input.linkedEnvironments, ([environmentId, label]) => ({
     environmentId,

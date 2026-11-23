@@ -9,6 +9,7 @@ import {
   HTML_RENDER_THEME_GUIDE,
   HTML_RENDER_TOOL_NAME,
 } from "@t3tools/shared/htmlRender";
+import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Schema from "effect/Schema";
 import { McpSchema, Tool, Toolkit } from "effect/ai";
 
@@ -104,6 +105,7 @@ const HtmlRenderTool = Tool.make(HTML_RENDER_TOOL_NAME, {
     McpInvocationContext.McpInvocationContext,
     ThreadManagementService.ThreadManagementService,
     HtmlRender.HtmlRender,
+    SecureRandom.SecureRandom,
   ],
 })
   .annotate(Tool.Title, "Render HTML")

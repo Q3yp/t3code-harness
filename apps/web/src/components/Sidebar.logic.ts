@@ -2,6 +2,7 @@ import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
+import { isPathWithinWorkspace } from "~/lib/agentWorkspaces";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
 import { threadPullRequestSearchTerms } from "@t3tools/shared/threadPullRequests";
 import * as React from "react";
@@ -590,6 +591,26 @@ export async function deleteSelectedThreadEntries<
   return { deletedThreadKeys, firstFailure };
 }
 
+export interface SidebarWorkspaceScope {
+  readonly environmentId: EnvironmentId;
+  readonly normalizedPath: string;
+}
+
+export function threadMatchesWorkspaceScopes(
+  thread: {
+    readonly environmentId: EnvironmentId;
+    readonly activeWorkspace?: { readonly path: string } | null | undefined;
+  },
+  scopedWorkspaces: ReadonlyArray<SidebarWorkspaceScope>,
+): boolean {
+  if (scopedWorkspaces.length === 0 || !thread.activeWorkspace) return false;
+  return scopedWorkspaces.some(
+    (scope) =>
+      scope.environmentId === thread.environmentId &&
+      isPathWithinWorkspace(thread.activeWorkspace!.path, scope.normalizedPath),
+  );
+}
+
 /**
  * `delegatedUnderParent` holds the tasks linked environments run for a thread
  * the sidebar lists, by thread key; they show under that thread, as subagents do.
@@ -597,12 +618,15 @@ export async function deleteSelectedThreadEntries<
 export function filterSidebarV2VisibleThreads<
   T extends Pick<SidebarThreadSummary, "archivedAt" | "environmentId" | "id" | "lineage"> & {
     projectId: string;
+    activeWorkspace?: { readonly path: string } | null | undefined;
   },
 >(
   threads: readonly T[],
   scopedProjectKeys: ReadonlySet<string> | null,
   delegatedUnderParent: ReadonlySet<string>,
+  scopedWorkspaces: ReadonlyArray<SidebarWorkspaceScope> = [],
 ): T[] {
+  const hasScope = scopedProjectKeys !== null || scopedWorkspaces.length > 0;
   return threads.filter(
     (thread) =>
       thread.archivedAt === null &&
@@ -611,8 +635,10 @@ export function filterSidebarV2VisibleThreads<
         thread.lineage,
         delegatedUnderParent,
       ) &&
-      (scopedProjectKeys === null ||
-        scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+      (!hasScope ||
+        (scopedProjectKeys !== null &&
+          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)) ||
+        threadMatchesWorkspaceScopes(thread, scopedWorkspaces)),
   );
 }
 

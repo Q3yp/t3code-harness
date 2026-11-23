@@ -50,6 +50,7 @@ interface CompactToolOutput {
   taskId?: string;
   scheduledTaskId?: string;
   status?: "rolled_back";
+  continuationStatus?: "scheduled" | "skipped";
   htmlRender?: HtmlRenderReference;
   [MCP_APP_OUTPUT_KEY]?: McpAppReference;
   thread?: { threadId: string };
@@ -142,6 +143,12 @@ export function compactDynamicToolOutput(value: unknown): CompactToolOutput | un
       if (id !== undefined) output[key] = id;
     }
     if (data.status === "rolled_back") output.status = "rolled_back";
+    const continuationStatus = Predicate.isObject(data.continuation)
+      ? data.continuation.status
+      : data.continuationStatus;
+    if (continuationStatus === "scheduled" || continuationStatus === "skipped") {
+      output.continuationStatus = continuationStatus;
+    }
     for (const key of ["linkedCount", "unlinkedCount"] as const) {
       const count = data[key];
       if (typeof count === "number" && Number.isSafeInteger(count)) output[key] = count;

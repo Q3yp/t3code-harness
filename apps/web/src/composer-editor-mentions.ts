@@ -31,6 +31,11 @@ export type ComposerPromptSegment =
       source: string;
     }
   | {
+      type: "subagent-preset";
+      presetName: string;
+      source: string;
+    }
+  | {
       type: "citation";
       citation: AssistantCitation;
       source: string;
@@ -98,13 +103,37 @@ function collectModelTokens(text: string, inlineTokens: ReadonlyArray<ComposerIn
     .map((mention) => ({ ...mention, type: "model" as const }));
 }
 
+// Leading `^preset ` at the start of the prompt; waits for whitespace like `$skill`.
+const LEADING_SUBAGENT_PRESET_TOKEN_REGEX = /^([ \t]*)\^([^\s@#^/$:,;()[\]"'`]+)(?=\s)/u;
+
+function collectLeadingSubagentPresetToken(
+  text: string,
+  inlineTokens: ReadonlyArray<ComposerInlineToken>,
+) {
+  const match = LEADING_SUBAGENT_PRESET_TOKEN_REGEX.exec(text);
+  if (!match) return [];
+  const prefix = match[1] ?? "";
+  const presetName = match[2] ?? "";
+  if (!presetName) return [];
+  const start = prefix.length;
+  const end = start + 1 + presetName.length;
+  const taken = [...inlineTokens, ...composerMathRanges(text, markdownMathRanges)];
+  if (taken.some((range) => start < range.end && end > range.start)) return [];
+  return [
+    { type: "subagent-preset" as const, presetName, source: text.slice(start, end), start, end },
+  ];
+}
+
 export function collectComposerPromptInlineTokens(text: string) {
   const inlineTokens = collectComposerInlineTokens(text, { findMath: markdownMathRanges });
   const models = collectModelTokens(text, inlineTokens);
+  const subagentPresets = collectLeadingSubagentPresetToken(text, inlineTokens);
   const tokens =
-    models.length === 0
+    models.length === 0 && subagentPresets.length === 0
       ? inlineTokens
-      : [...inlineTokens, ...models].sort((left, right) => left.start - right.start);
+      : [...inlineTokens, ...models, ...subagentPresets].sort(
+          (left, right) => left.start - right.start,
+        );
   const citations = collectAssistantCitations(text);
   const references = collectComposerContextReferences(text);
   if (citations.length === 0 && references.length === 0) return tokens;
@@ -160,6 +189,12 @@ function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegmen
         type: "model",
         instanceId: match.instanceId,
         model: match.model,
+        source: match.source,
+      });
+    } else if (match.type === "subagent-preset") {
+      segments.push({
+        type: "subagent-preset",
+        presetName: match.presetName,
         source: match.source,
       });
     } else {

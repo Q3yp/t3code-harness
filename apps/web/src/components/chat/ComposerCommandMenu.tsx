@@ -1,3 +1,4 @@
+import { type AtMentionCategory } from "@t3tools/client-runtime/composer-model-presets";
 import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import type { ComposerPathSearchTarget } from "@t3tools/client-runtime/state/threads";
 import {
@@ -7,6 +8,7 @@ import {
 import {
   type EnvironmentId,
   type EnvironmentMachineKind,
+  type ModelSelection,
   type ProjectEntry,
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -18,6 +20,7 @@ import {
 import {
   BlocksIcon,
   FolderIcon,
+  GitBranchIcon,
   MessagesSquareIcon,
   PackageIcon,
   SettingsIcon,
@@ -30,7 +33,7 @@ import { memo, useLayoutEffect, useRef, useState } from "react";
 import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
 import { cn } from "~/lib/utils";
 import { Badge } from "../ui/badge";
-import { Command, CommandGroup, CommandItem, CommandList } from "../ui/command";
+import { Command, CommandGroup, CommandGroupLabel, CommandItem, CommandList } from "../ui/command";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { EnvironmentMachineIcon } from "../EnvironmentMachineIcon";
 import { PierreEntryIcon } from "./PierreEntryIcon";
@@ -104,7 +107,69 @@ export type ComposerCommandItem =
       acpRegistryIconUrl: string | undefined;
       label: string;
       description: string;
+    }
+  | {
+      id: string;
+      type: "model-preset";
+      mode: "switch" | "subagent";
+      presetName: string;
+      modelSelection: ModelSelection;
+      driverKind: ProviderDriverKind | null;
+      providerDisplayName: string;
+      acpRegistryAgentId: string | undefined;
+      acpRegistryIconUrl: string | undefined;
+      label: string;
+      description: string;
     };
+
+const AT_CATEGORY_PILL_META: Readonly<
+  Record<AtMentionCategory, { readonly label: string; readonly shortcut: string | null }>
+> = {
+  all: { label: msg("All"), shortcut: null },
+  preset: { label: msg("Presets"), shortcut: "p:" },
+  path: { label: msg("Files"), shortcut: "f:" },
+  thread: { label: msg("Threads"), shortcut: "t:" },
+  model: { label: msg("Models"), shortcut: "m:" },
+  environment: { label: msg("Machines"), shortcut: "e:" },
+};
+
+const AT_ITEM_GROUP_LABELS: Readonly<
+  Record<
+    Extract<
+      ComposerCommandItem["type"],
+      "model-preset" | "thread" | "environment" | "model" | "path"
+    >,
+    string
+  >
+> = {
+  "model-preset": msg("Model presets"),
+  thread: msg("Threads"),
+  environment: msg("Machines"),
+  model: msg("Models"),
+  path: msg("Files & folders"),
+};
+
+function groupAtMenuItems(items: ReadonlyArray<ComposerCommandItem>): ReadonlyArray<{
+  readonly key: string;
+  readonly label: string;
+  readonly items: ComposerCommandItem[];
+}> {
+  const groups: Array<{ key: string; label: string; items: ComposerCommandItem[] }> = [];
+  for (const item of items) {
+    const label =
+      item.type in AT_ITEM_GROUP_LABELS
+        ? AT_ITEM_GROUP_LABELS[item.type as keyof typeof AT_ITEM_GROUP_LABELS]
+        : null;
+    const key = label ? item.type : "other";
+    const last = groups[groups.length - 1];
+    if (last && last.key === key) {
+      last.items.push(item);
+    } else {
+      groups.push({ key, label: label ?? "", items: [item] });
+    }
+  }
+  return groups;
+}
 
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   listId: string;
@@ -114,6 +179,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
   triggerKind: ComposerTriggerKind | null;
   emptyStateText?: string;
   activeItemId: string | null;
+  atCategory?: AtMentionCategory;
+  atCategoryLocked?: boolean;
+  availableAtCategories?: ReadonlyArray<AtMentionCategory>;
+  onAtCategoryChange?: (category: AtMentionCategory) => void;
   onHighlightedItemChange: (itemId: string | null) => void;
   onSelect: (item: ComposerCommandItem) => void;
 }) {
@@ -130,6 +199,13 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
     el?.scrollIntoView({ block: "nearest" });
   }, [props.activeItemId]);
 
+  const showAtCategoryBar =
+    props.triggerKind === "path" &&
+    props.availableAtCategories !== undefined &&
+    props.availableAtCategories.length > 1 &&
+    props.onAtCategoryChange !== undefined;
+  const groupedAtItems = props.triggerKind === "path" ? groupAtMenuItems(props.items) : null;
+
   return (
     <Command
       autoHighlight={false}
@@ -145,6 +221,44 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
         className="flex min-h-0 w-full flex-col overflow-hidden pb-(--chat-composer-attachment-overlap) **:data-[slot=command-item]:rounded-lg **:data-[slot=scroll-area-scrollbar]:data-[orientation=vertical]:my-4"
         data-composer-command-drawer="true"
       >
+        {showAtCategoryBar ? (
+          <div
+            className="flex items-center gap-1 overflow-x-auto border-b border-foreground/[0.06] px-2.5 py-1.5"
+            role="tablist"
+            aria-label={gt("Mention categories")}
+          >
+            {props.availableAtCategories!.map((category) => {
+              const meta = AT_CATEGORY_PILL_META[category];
+              const isSelected = (props.atCategory ?? "all") === category;
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  role="tab"
+                  aria-selected={isSelected}
+                  disabled={props.atCategoryLocked && !isSelected}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                  }}
+                  onClick={() => {
+                    props.onAtCategoryChange?.(category);
+                  }}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-0.5 text-xs font-medium transition-colors",
+                    isSelected
+                      ? "bg-accent text-accent-foreground"
+                      : "text-secondary-label hover:bg-foreground/[0.06] hover:text-foreground disabled:opacity-45",
+                  )}
+                >
+                  <span>{m(meta.label)}</span>
+                  {meta.shortcut ? (
+                    <span className="font-mono text-xs opacity-65">@{meta.shortcut}</span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
         {props.items.length > 0 ? (
           <CommandList
             id={props.listId}
@@ -153,20 +267,40 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
             }
             className="max-h-72 min-h-0 scroll-pb-6"
           >
-            <CommandGroup>
-              {props.items.map((item) => (
-                <ComposerCommandMenuItem
-                  key={item.id}
-                  optionId={composerSuggestionOptionId(props.listId, item.id)}
-                  item={item}
-                  triggerKind={props.triggerKind}
-                  resolvedTheme={props.resolvedTheme}
-                  isActive={props.activeItemId === item.id}
-                  onHighlight={props.onHighlightedItemChange}
-                  onSelect={props.onSelect}
-                />
-              ))}
-            </CommandGroup>
+            {groupedAtItems ? (
+              groupedAtItems.map((group) => (
+                <CommandGroup key={group.key}>
+                  {group.label ? <CommandGroupLabel>{m(group.label)}</CommandGroupLabel> : null}
+                  {group.items.map((item) => (
+                    <ComposerCommandMenuItem
+                      key={item.id}
+                      optionId={composerSuggestionOptionId(props.listId, item.id)}
+                      item={item}
+                      triggerKind={props.triggerKind}
+                      resolvedTheme={props.resolvedTheme}
+                      isActive={props.activeItemId === item.id}
+                      onHighlight={props.onHighlightedItemChange}
+                      onSelect={props.onSelect}
+                    />
+                  ))}
+                </CommandGroup>
+              ))
+            ) : (
+              <CommandGroup>
+                {props.items.map((item) => (
+                  <ComposerCommandMenuItem
+                    key={item.id}
+                    optionId={composerSuggestionOptionId(props.listId, item.id)}
+                    item={item}
+                    triggerKind={props.triggerKind}
+                    resolvedTheme={props.resolvedTheme}
+                    isActive={props.activeItemId === item.id}
+                    onHighlight={props.onHighlightedItemChange}
+                    onSelect={props.onSelect}
+                  />
+                ))}
+              </CommandGroup>
+            )}
           </CommandList>
         ) : (
           <div className="px-5 pt-3.5 pb-7">
@@ -181,8 +315,10 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
                   (props.triggerKind === "skill"
                     ? gt("No skills found. Try / to browse provider commands.")
                     : props.triggerKind === "path"
-                      ? gt("No matching files or folders.")
-                      : gt("No matching command.")))}
+                      ? gt("No matching items.")
+                      : props.triggerKind === "subagent-preset"
+                        ? gt("No matching model presets.")
+                        : gt("No matching command.")))}
             </p>
           </div>
         )}
@@ -261,6 +397,23 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
           iconClassName="size-4"
         />
       ) : null}
+      {props.item.type === "model-preset" ? (
+        <span className="inline-flex shrink-0 items-center gap-1">
+          {props.item.mode === "subagent" ? (
+            <GitBranchIcon aria-hidden="true" className="size-3.5 text-secondary-label" />
+          ) : null}
+          {props.item.driverKind ? (
+            <ProviderInstanceIcon
+              driverKind={props.item.driverKind}
+              displayName={props.item.providerDisplayName}
+              acpRegistryAgentId={props.item.acpRegistryAgentId}
+              acpRegistryIconUrl={props.item.acpRegistryIconUrl}
+              className="size-4 shrink-0"
+              iconClassName="size-4"
+            />
+          ) : null}
+        </span>
+      ) : null}
       {pullRequestPresentation ? (
         <pullRequestPresentation.Icon
           role="img"
@@ -299,6 +452,13 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
             showSkillSuffix={props.triggerKind === "skill"}
           />
         ) : null}
+        {props.item.type === "model-preset" ? (
+          <Badge className="ms-auto" variant="secondary">
+            {props.item.mode === "subagent"
+              ? m(msg("Subagent", { $context: "composer preset badge" }))
+              : m(msg("Switch on send", { $context: "composer preset badge" }))}
+          </Badge>
+        ) : null}
       </span>
     </CommandItem>
   );
@@ -310,10 +470,11 @@ export function composerSuggestionOptionId(listId: string, itemId: string): stri
 }
 
 const LISTBOX_LABEL_BY_TRIGGER: Record<ComposerTriggerKind, string> = {
-  path: msg("Files and folders"),
+  path: msg("Mentions"),
   "pull-request": msg("Pull requests"),
   "slash-command": msg("Commands"),
   skill: msg("Skills"),
+  "subagent-preset": msg("Subagent presets"),
 };
 
 const SKILL_SOURCE_ICON_BY_KIND: Record<ProviderSkillSourceKind, LucideIcon> = {

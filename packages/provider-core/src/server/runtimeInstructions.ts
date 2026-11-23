@@ -24,8 +24,10 @@ export function buildRuntimeInstructions(runtime: {
   readonly reasoningEffort?: string | undefined;
   /** False when the session's system prompt already carries the linking instructions. */
   readonly pullRequestLinking?: boolean;
-  /** Adds the folder list of a multi-folder thread. */
-  readonly runtimePolicy?: Pick<ProviderAdapterV2RuntimePolicy, "cwd" | "workspace"> | undefined;
+  /** Adds the folder list of a multi-folder thread and the Agent Workspaces catalog. */
+  readonly runtimePolicy?:
+    | Pick<ProviderAdapterV2RuntimePolicy, "cwd" | "workspace" | "agentWorkspaces">
+    | undefined;
 }): string {
   const harness = toSingleLine(runtime.harness);
   const model = toSingleLine(runtime.model ?? "");
@@ -40,11 +42,19 @@ export function buildRuntimeInstructions(runtime: {
   const feedback = feedbackLine ? `\n${feedbackLine}` : "";
   const workspace =
     runtime.runtimePolicy === undefined ? "" : buildWorkspaceInstructions(runtime.runtimePolicy);
+  const agentWorkspaces =
+    runtime.runtimePolicy === undefined
+      ? ""
+      : buildAgentWorkspacesInstructions(runtime.runtimePolicy);
   const linked =
     runtime.pullRequestLinking === false
       ? runtimeInfo
       : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
-  return [linked + feedback, ...(workspace === "" ? [] : [workspace])].join("\n\n");
+  return [
+    linked + feedback,
+    ...(workspace === "" ? [] : [workspace]),
+    ...(agentWorkspaces === "" ? [] : [agentWorkspaces]),
+  ].join("\n\n");
 }
 
 function toSingleLine(value: string): string {
@@ -93,6 +103,66 @@ export function buildWorkspaceInstructions(
       `- ${folderLabel(folder.name)} (${folder.isGitRepository ? "Git repository" : "folder"}): ${folderPath(folder.path)}`,
   );
   // Reserve room for the line that counts folders left out.
+  let budget = WORKSPACE_INSTRUCTIONS_MAX_BYTES - byteLength([...head, ...tail].join("\n")) - 32;
+  const shown: Array<string> = [];
+  for (const entry of entries) {
+    budget -= byteLength(entry) + 1;
+    if (budget < 0) break;
+    shown.push(entry);
+  }
+  const hidden = entries.length - shown.length;
+  return [...head, ...shown, ...(hidden > 0 ? [`- Not listed: ${hidden} more`] : []), ...tail].join(
+    "\n",
+  );
+}
+
+const WORKSPACE_DESCRIPTION_MAX_LENGTH = 240;
+
+function workspaceDescription(value: string): string {
+  const cleaned = Array.from(
+    value.replaceAll(LINE_BREAKING, " ").replaceAll(/[<>`]/g, " ").replaceAll(/\s+/g, " ").trim(),
+  );
+  if (cleaned.length === 0) return "";
+  return cleaned.length > WORKSPACE_DESCRIPTION_MAX_LENGTH
+    ? `${cleaned.slice(0, WORKSPACE_DESCRIPTION_MAX_LENGTH - 1).join("")}…`
+    : cleaned.join("");
+}
+
+/**
+ * Formats the live Agent Workspaces catalog for every provider turn.
+ * Empty when no workspaces are registered, no errors exist, and no workspace is active.
+ */
+export function buildAgentWorkspacesInstructions(
+  runtimePolicy: Pick<ProviderAdapterV2RuntimePolicy, "agentWorkspaces">,
+): string {
+  const catalog = runtimePolicy.agentWorkspaces;
+  if (
+    catalog === undefined ||
+    (catalog.workspaces.length === 0 &&
+      catalog.errors.length === 0 &&
+      (catalog.activeWorkspace === undefined || catalog.activeWorkspace === null))
+  ) {
+    return "";
+  }
+  const head = [
+    "<agent_workspaces>",
+    "Workspaces hold live AGENTS.md instructions for a body of work and coexist with skills. Select a workspace by description when it matches the user's task, then call `workspace_activate` (which updates this thread's working root, reads its live AGENTS.md, and automatically continues work in the new root). Use `workspace_list` to refresh, `workspace_clear` to restore the thread's original root, and `workspace_register` / `workspace_unregister` only when the user authorizes managing registrations. Read linked guidelines and nested AGENTS.md files as needed; save work-specific learning only when authorized.",
+    ...(catalog.activeWorkspace
+      ? [
+          `Active workspace: ${folderLabel(catalog.activeWorkspace.name)} (${folderPath(catalog.activeWorkspace.path)})`,
+        ]
+      : []),
+  ];
+  const tail = ["</agent_workspaces>"];
+  const entries = [
+    ...catalog.workspaces.map(
+      (workspace) =>
+        `- ${folderLabel(workspace.name)}: ${workspaceDescription(workspace.description)} (${folderPath(workspace.path)})`,
+    ),
+    ...(catalog.errors.length > 0
+      ? ["Registration errors:", ...catalog.errors.map((error) => `- ${folderPath(error)}`)]
+      : []),
+  ];
   let budget = WORKSPACE_INSTRUCTIONS_MAX_BYTES - byteLength([...head, ...tail].join("\n")) - 32;
   const shown: Array<string> = [];
   for (const entry of entries) {

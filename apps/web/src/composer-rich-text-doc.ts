@@ -58,13 +58,17 @@ import { markdownMathRanges } from "~/markdown/wordsHast";
 export type SkillMeta = { label: string; description: string | null };
 
 export type IsKnownModel = (instanceId: string, model: string) => boolean;
+export type IsKnownModelPreset = (name: string) => boolean;
 
 interface ChipResolver {
   skill: (name: string) => SkillMeta | null;
   model: IsKnownModel;
+  modelPreset: IsKnownModelPreset;
+  allowSubagentPreset?: boolean;
 }
 
 const NO_MODELS: IsKnownModel = () => false;
+const NO_MODEL_PRESETS: IsKnownModelPreset = () => false;
 
 const MARK_NESTING_ORDER: RichTextMark[] = ["strike", "bold", "italic", "code"];
 
@@ -808,6 +812,12 @@ function atomJsonForSegment(
   chips: ChipResolver,
 ): AtomJson | null {
   if (segment.type === "mention") {
+    if (segment.source.startsWith("@") && chips.modelPreset(segment.path)) {
+      return {
+        type: "composer-model-preset",
+        attrs: { presetName: segment.path, mode: "switch", source: segment.source },
+      };
+    }
     return {
       type: "composer-mention",
       attrs: { path: segment.path, source: segment.source },
@@ -830,6 +840,13 @@ function atomJsonForSegment(
     return {
       type: "composer-model",
       attrs: { instanceId: segment.instanceId, model: segment.model, source: segment.source },
+    };
+  }
+  if (segment.type === "subagent-preset") {
+    if (chips.allowSubagentPreset === false || !chips.modelPreset(segment.presetName)) return null;
+    return {
+      type: "composer-model-preset",
+      attrs: { presetName: segment.presetName, mode: "subagent", source: segment.source },
     };
   }
   if (segment.type === "citation") {
@@ -916,9 +933,18 @@ export function buildTiptapContent(
     literalText?: boolean;
     literalLength?: number;
     isKnownModel?: IsKnownModel;
+    isKnownModelPreset?: IsKnownModelPreset;
+    allowSubagentPreset?: boolean;
   },
 ): Record<string, unknown>[] {
-  const chips = { skill: skillLabelFor, model: options?.isKnownModel ?? NO_MODELS };
+  const chips: ChipResolver = {
+    skill: skillLabelFor,
+    model: options?.isKnownModel ?? NO_MODELS,
+    modelPreset: options?.isKnownModelPreset ?? NO_MODEL_PRESETS,
+    ...(options?.allowSubagentPreset === undefined
+      ? {}
+      : { allowSubagentPreset: options.allowSubagentPreset }),
+  };
   if (options?.literalText) {
     return value.split("\n").map((line) => ({
       type: "paragraph",
@@ -1174,7 +1200,12 @@ export function buildTiptapContent(
 export function buildDocJson(
   value: string,
   skillLabelFor: (name: string) => SkillMeta | null,
-  options?: { styling?: boolean; literalText?: boolean; isKnownModel?: IsKnownModel },
+  options?: {
+    styling?: boolean;
+    literalText?: boolean;
+    isKnownModel?: IsKnownModel;
+    isKnownModelPreset?: IsKnownModelPreset;
+  },
 ) {
   const content = buildTiptapContent(value, skillLabelFor, options);
   if (content.at(-1)?.type === "horizontalRule") content.push({ type: "paragraph" });
@@ -1208,6 +1239,7 @@ function readAtomSource(node: ProseMirrorNode): string {
   switch (node.type.name) {
     case "composer-mention":
     case "composer-model":
+    case "composer-model-preset":
     case "composer-citation":
     case "composer-context-reference":
       return typeof attrs.source === "string" ? attrs.source : "";
@@ -1800,11 +1832,23 @@ export interface SkillChipReplacement {
 }
 
 function isStaleChip(node: ProseMirrorNode, chips: ChipResolver): boolean {
-  const { skillName, instanceId, model } = node.attrs as Record<string, unknown>;
+  const { skillName, instanceId, model, presetName, path, source } = node.attrs as Record<
+    string,
+    unknown
+  >;
   if (node.type.name === "composer-skill") {
     return typeof skillName === "string" && skillName !== "" && !chips.skill(skillName);
   }
   if (node.type.name === "composer-model") return !chips.model(String(instanceId), String(model));
+  if (node.type.name === "composer-model-preset") return !chips.modelPreset(String(presetName));
+  if (node.type.name === "composer-mention") {
+    return (
+      typeof source === "string" &&
+      source.startsWith("@") &&
+      typeof path === "string" &&
+      chips.modelPreset(path)
+    );
+  }
   return false;
 }
 
@@ -1816,12 +1860,25 @@ export function skillChipReplacements(
   doc: ProseMirrorNode,
   skillLabelFor: (name: string) => SkillMeta | null,
   isKnownModel: IsKnownModel = NO_MODELS,
+  isKnownModelPreset: IsKnownModelPreset = NO_MODEL_PRESETS,
 ): SkillChipReplacement[] {
-  const chips = { skill: skillLabelFor, model: isKnownModel };
+  const chips = { skill: skillLabelFor, model: isKnownModel, modelPreset: isKnownModelPreset };
   const schema = doc.type.schema;
   const replacements: SkillChipReplacement[] = [];
   doc.descendants((node, pos) => {
     if (!isStaleChip(node, chips)) return;
+    if (node.type.name === "composer-mention") {
+      const { path, source } = node.attrs as Record<string, unknown>;
+      const presetType = schema.nodes["composer-model-preset"];
+      if (presetType && typeof path === "string" && typeof source === "string") {
+        replacements.push({
+          from: pos,
+          to: pos + node.nodeSize,
+          node: presetType.create({ presetName: path, mode: "switch", source }, null, node.marks),
+        });
+        return;
+      }
+    }
     replacements.push({
       from: pos,
       to: pos + node.nodeSize,
@@ -1833,7 +1890,17 @@ export function skillChipReplacements(
   for (const segment of splitPromptIntoComposerSegments(map.value)) {
     const start = end;
     end += segment.type === "text" ? segment.text.length : segment.source.length;
-    if (segment.type !== "skill" && segment.type !== "model") continue;
+    if (
+      segment.type !== "skill" &&
+      segment.type !== "model" &&
+      segment.type !== "subagent-preset" &&
+      !(
+        segment.type === "mention" &&
+        segment.source.startsWith("@") &&
+        chips.modelPreset(segment.path)
+      )
+    )
+      continue;
     const atom = atomJsonForSegment(segment, chips);
     const type = atom && schema.nodes[atom.type];
     if (!atom || !type) continue;

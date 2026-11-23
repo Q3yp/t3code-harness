@@ -221,6 +221,7 @@ import { deletePendingAttachment, issueAttachmentUploadUrl } from "./assets/Atta
 import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
+import * as AgentWorkspaceService from "./workspace/AgentWorkspaceService.ts";
 import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -1585,6 +1586,7 @@ export const layerWsRpc = (
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFolders = yield* WorkspaceFolders.WorkspaceFolders;
+      const agentWorkspaces = yield* AgentWorkspaceService.AgentWorkspaceService;
       const taskFolders = yield* TaskFolders.TaskFolders;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -2043,17 +2045,32 @@ export const layerWsRpc = (
                 .enqueueCommand(
                   (command.type === "prepared-run.retry"
                     ? threadLaunch.retryPreparation(command)
-                    : ThreadMessageIntake.dispatchCommand(
-                        ThreadManagementService.withCreationProvenance(command, {
-                          createdBy: "user",
-                          creationSource:
-                            "creationSource" in command ? command.creationSource : "web",
-                        }),
-                        {
-                          managesProviders:
-                            currentSession.scopes.includes(AuthProvidersManageScope),
-                        },
-                      )
+                    : Effect.gen(function* () {
+                        const verifiedCommand: typeof command =
+                          (command.type === "thread.metadata.update" ||
+                            command.type === "thread.create") &&
+                          command.activeWorkspace != null
+                            ? {
+                                ...command,
+                                activeWorkspace: yield* agentWorkspaces.verifyActiveWorkspace(
+                                  command.activeWorkspace,
+                                ),
+                              }
+                            : command;
+                        return yield* ThreadMessageIntake.dispatchCommand(
+                          ThreadManagementService.withCreationProvenance(verifiedCommand, {
+                            createdBy: "user",
+                            creationSource:
+                              "creationSource" in verifiedCommand
+                                ? verifiedCommand.creationSource
+                                : "web",
+                          }),
+                          {
+                            managesProviders:
+                              currentSession.scopes.includes(AuthProvidersManageScope),
+                          },
+                        );
+                      })
                   ).pipe(Effect.provide(intakeContext)),
                 )
                 .pipe(
@@ -2063,7 +2080,10 @@ export const layerWsRpc = (
                   Effect.map((result) => ({ sequence: result.sequence })),
                   Effect.mapError((cause) => {
                     if (cause._tag === "EnvironmentAuthorizationError") return cause;
-                    const detail = userFacingDispatchErrorMessage(cause);
+                    const detail =
+                      cause._tag === "AgentWorkspaceError"
+                        ? cause.message
+                        : userFacingDispatchErrorMessage(cause);
                     return new OrchestrationV2DispatchCommandError({
                       commandId: command.commandId,
                       commandType: command.type,
@@ -2227,6 +2247,11 @@ export const layerWsRpc = (
                     })
                     .pipe(
                       Effect.andThen(
+                        input.activeWorkspace != null
+                          ? agentWorkspaces.verifyActiveWorkspace(input.activeWorkspace)
+                          : Effect.succeed(input.activeWorkspace),
+                      ),
+                      Effect.flatMap((verifiedActiveWorkspace) =>
                         ThreadMessageIntake.launchThread({
                           commandId: input.commandId,
                           ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
@@ -2242,6 +2267,9 @@ export const layerWsRpc = (
                           runtimeMode: input.runtimeMode,
                           interactionMode: input.interactionMode,
                           workspaceStrategy: input.workspaceStrategy,
+                          ...(verifiedActiveWorkspace === undefined
+                            ? {}
+                            : { activeWorkspace: verifiedActiveWorkspace }),
                           ...(input.initialMessage === undefined
                             ? {}
                             : {
@@ -2337,6 +2365,13 @@ export const layerWsRpc = (
                         cause,
                       }),
                     ThreadLaunchNotRepositoryError: (cause) =>
+                      new OrchestrationV2ThreadLaunchError({
+                        commandId: input.commandId,
+                        projectId: input.projectId,
+                        message: cause.message,
+                        cause,
+                      }),
+                    AgentWorkspaceError: (cause) =>
                       new OrchestrationV2ThreadLaunchError({
                         commandId: input.commandId,
                         projectId: input.projectId,
@@ -3139,6 +3174,9 @@ export const layerWsRpc = (
         [WS_METHODS.workspaceTaskFolder]: (input) =>
           taskFolders.find(input.worktreePath).pipe(Effect.map((taskFolder) => ({ taskFolder }))),
         [WS_METHODS.workspaceAddTaskFolderRepository]: (input) => taskFolders.addRepository(input),
+        [WS_METHODS.agentWorkspacesList]: () => agentWorkspaces.list(),
+        [WS_METHODS.agentWorkspacesRegister]: (input) => agentWorkspaces.register(input.path),
+        [WS_METHODS.agentWorkspacesUnregister]: (input) => agentWorkspaces.unregister(input.path),
         [WS_METHODS.attachmentsCreateUploadUrl]: (input) => issueAttachmentUploadUrl(input),
         [WS_METHODS.attachmentsDelete]: (input) => deletePendingAttachment(input.attachmentId),
         [WS_METHODS.agentSessionsScan]: () => agentSessionScanner.scan,
@@ -3223,7 +3261,10 @@ export const layerWsRpc = (
             }
             return yield* issueAssetUrl({
               resource: input.resource,
-              workspaceRoot: thread.thread.worktreePath ?? project.value.workspaceRoot,
+              workspaceRoot:
+                thread.thread.activeWorkspace?.path ??
+                thread.thread.worktreePath ??
+                project.value.workspaceRoot,
             });
           }),
         [WS_METHODS.assetsPersistChatAttachments]: (input) =>

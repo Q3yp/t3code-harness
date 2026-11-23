@@ -5,6 +5,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
@@ -14,6 +15,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "../worktreesDirectory.ts";
+import * as AgentWorkspaceService from "./AgentWorkspaceService.ts";
 
 export class UnknownWorkspaceError extends Schema.TaggedError<UnknownWorkspaceError>()(
   "UnknownWorkspaceError",
@@ -23,7 +25,7 @@ export class UnknownWorkspaceError extends Schema.TaggedError<UnknownWorkspaceEr
   },
 ) {
   override get message(): string {
-    return `'${this.cwd}' is not a registered project, a tracked folder, a managed worktree, or a thread's worktree.`;
+    return `'${this.cwd}' is not a registered project, a registered workspace, a tracked folder, a managed worktree, or a thread's worktree.`;
   }
 }
 
@@ -55,6 +57,9 @@ export const make = Effect.gen(function* () {
   const projectStore = yield* ProjectStore.ProjectStoreV2;
   const sql = yield* SqlClient.SqlClient;
   const git = yield* GitVcsDriver.GitVcsDriver;
+  const agentWorkspaces = Option.getOrUndefined(
+    yield* Effect.serviceOption(AgentWorkspaceService.AgentWorkspaceService),
+  );
 
   // Missing roots keep lexical paths; other resolution failures and filesystem roots grant nothing.
   const resolveRoot = (value: string) => {
@@ -94,6 +99,13 @@ export const make = Effect.gen(function* () {
       for (const project of projects) {
         for (const folder of project.trackedFolders ?? []) {
           if (within(yield* resolveRoot(folder.path))) return true;
+        }
+      }
+
+      if (agentWorkspaces !== undefined) {
+        const registeredWorkspacePaths = yield* agentWorkspaces.registeredPaths();
+        for (const workspacePath of registeredWorkspacePaths) {
+          if (within(yield* resolveRoot(workspacePath))) return true;
         }
       }
 

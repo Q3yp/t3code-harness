@@ -1326,12 +1326,18 @@ export default function ChatView(props: ChatViewProps) {
     : (primaryEnvironment?.serverConfig ?? null);
   const providerEnvironmentId = (activeThread ? activeEnvironment : primaryEnvironment)
     ?.environmentId;
-  const gitCwd = activeProject
-    ? projectScriptCwd({
-        project: { cwd: activeProject.workspaceRoot },
-        worktreePath: activeThread?.worktreePath ?? null,
-      })
-    : null;
+  const activeThreadWorkspace =
+    (isServerThread
+      ? (serverThread?.activeWorkspace ?? activeThread?.activeWorkspace)
+      : draftThread?.activeWorkspace) ?? null;
+  const gitCwd =
+    activeThreadWorkspace?.path ??
+    (activeProject
+      ? projectScriptCwd({
+          project: { cwd: activeProject.workspaceRoot },
+          worktreePath: activeThread?.worktreePath ?? null,
+        })
+      : null);
   const providerStatuses = resolveProvidersForCwd(
     (providerEnvironmentId === undefined
       ? undefined
@@ -1728,7 +1734,7 @@ export default function ChatView(props: ChatViewProps) {
     turnDiffSummaries.at(-1)?.completedAt ?? null,
   );
 
-  const gitStatusCwd = activeThread?.worktreePath ?? gitCwd;
+  const gitStatusCwd = activeThreadWorkspace?.path ?? activeThread?.worktreePath ?? gitCwd;
   const gitStatusAtom =
     gitStatusCwd === null
       ? null
@@ -1841,7 +1847,8 @@ export default function ChatView(props: ChatViewProps) {
   const hasTimelineTopBanner = Boolean(timelineThreadError) || visibleProviderStatus !== null;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
-  const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const activeWorkspaceRoot =
+    activeThreadWorkspace?.path ?? activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null;
   const liveIsGitRepo = gitStatusQuery.data?.isRepo;
@@ -2845,16 +2852,22 @@ export default function ChatView(props: ChatViewProps) {
     ];
   })() as ComposerBannerStackItem[];
 
+  const defaultTerminalCwd =
+    activeThreadWorkspace?.path ??
+    (activeProjectCwd !== null
+      ? projectScriptCwd({
+          project: { cwd: activeProjectCwd },
+          worktreePath: activeThreadWorktreePath,
+        })
+      : null);
+  const defaultTerminalWorktreePath = activeThreadWorkspace ? null : activeThreadWorktreePath;
   if (
     terminalUiLaunchContext !== null &&
     (terminalUiLaunchContext.threadId !== activeThreadId ||
       !terminalUiState.terminalOpen ||
-      (activeProjectCwd !== null &&
-        projectScriptCwd({
-          project: { cwd: activeProjectCwd },
-          worktreePath: activeThreadWorktreePath,
-        }) === terminalUiLaunchContext.cwd &&
-        (activeThreadWorktreePath ?? null) === terminalUiLaunchContext.worktreePath))
+      (defaultTerminalCwd !== null &&
+        defaultTerminalCwd === terminalUiLaunchContext.cwd &&
+        defaultTerminalWorktreePath === terminalUiLaunchContext.worktreePath))
   ) {
     setTerminalUiLaunchContext(null);
   }
@@ -3552,9 +3565,11 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadEnvironmentId={activeThread.environmentId}
               activeThreadId={activeThread.id}
               isServerThread={isServerThread}
+              {...(draftId ? { draftId } : {})}
               activeThreadTitle={activeThread.title}
               activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
               activeProject={activeProject ?? null}
+              activeWorkspace={activeThreadWorkspace}
               parentThreadLink={headerParentThreadLink}
               onOpenThread={onOpenRelatedThreadStable}
               rightPanelOpen={inlineRightPanelOwnsTitleBar}
@@ -4093,6 +4108,7 @@ export default function ChatView(props: ChatViewProps) {
                   threadId={activeThread.id}
                   projectId={activeThread.projectId}
                   worktreePath={activeThread.worktreePath}
+                  activeWorkspace={activeThreadWorkspace}
                   isServerThread={isServerThread}
                   {...(draftId ? { draftId } : {})}
                   composerDraftTarget={composerDraftTarget}

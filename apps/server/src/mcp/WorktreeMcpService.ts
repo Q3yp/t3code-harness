@@ -355,6 +355,7 @@ const make = Effect.gen(function* () {
               threadId: scope.thread.threadId,
               branch: worktree.refName,
               worktreePath,
+              activeWorkspace: null,
               expectedWorktreePath: null,
               // Binding detaches the session and ends the caller; a later send could lose the race.
               ...(input.continuationPrompt === undefined

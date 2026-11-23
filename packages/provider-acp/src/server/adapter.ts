@@ -36,15 +36,9 @@ import {
 } from "@t3tools/contracts";
 import { AgentScope, AgentScopeThreadId } from "@t3tools/shared/AgentScope";
 import * as HostProcess from "@t3tools/shared/HostProcess";
-import { HTML_RENDER_TOOL_NAME } from "@t3tools/shared/htmlRender";
 import { modelSelectionsEqual } from "@t3tools/shared/model";
 import { type SelfInvocation, selfInvocationArgs } from "@t3tools/shared/nodeRuntime";
-import { resolveT3McpToolId } from "@t3tools/shared/t3McpToolPresentation";
-import {
-  compactDynamicToolOutput,
-  htmlRenderFromToolItem,
-  mcpToolResultOutput,
-} from "@t3tools/shared/toolOutput";
+import { mcpToolResultOutput } from "@t3tools/shared/toolOutput";
 import { FILE_HEADERS_ONLY, formatPatch, structuredPatch } from "diff";
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
@@ -4756,43 +4750,7 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
             const toolName = `${mcpIdentity.server}.${mcpIdentity.tool}`;
             const input =
               mcpIdentity.input ?? unknownRecord(rawInputRecord?.arguments) ?? rawInputRecord ?? {};
-            let output = rawOutput === undefined ? undefined : acpMcpToolCallOutput(rawOutput);
-            const isHtmlRender = resolveT3McpToolId(toolName) === HTML_RENDER_TOOL_NAME;
-            const isError =
-              compactDynamicToolOutput(output)?.isError === true ||
-              compactDynamicToolOutput(rawOutputRecord?.result)?.isError === true;
-            if (
-              isHtmlRender &&
-              (status === "failed" || (status === "completed" && isError)) &&
-              previous?.status !== "failed" &&
-              previous?.status !== "completed"
-            ) {
-              // A failed call may have published before the provider lost its result.
-              yield* mcpSessions.takeHtmlRender(
-                context.input.threadId,
-                input,
-                htmlRenderFromToolItem({ toolName, output }),
-              );
-            }
-            if (status === "completed" && isHtmlRender && !isError) {
-              const reportedPage = htmlRenderFromToolItem({ toolName, output });
-              // Antigravity replaces MCP results with summaries, including on repeated completions.
-              const previousPage = htmlRenderFromToolItem({
-                toolName,
-                output: acpMcpToolCallOutput(previous?.data.rawOutput ?? previous?.data.content),
-              });
-              const page = reportedPage
-                ? yield* mcpSessions.takeHtmlRender(context.input.threadId, input, reportedPage)
-                : (previousPage ??
-                  (yield* mcpSessions.takeHtmlRender(context.input.threadId, input)));
-              if (reportedPage === undefined && page !== undefined) {
-                output = { htmlRender: page };
-                context.tools.set(toolCall.toolCallId, {
-                  ...toolCall,
-                  data: { ...toolCall.data, rawOutput: output },
-                });
-              }
-            }
+            const output = rawOutput === undefined ? undefined : acpMcpToolCallOutput(rawOutput);
             turnItem = {
               ...base,
               title: null,

@@ -1,5 +1,9 @@
 import { useGT, useMessages } from "gt-react";
 import {
+  type AtMentionCategory,
+  parseAtMentionQuery,
+} from "@t3tools/client-runtime/composer-model-presets";
+import {
   legacyThreadPullRequestKey,
   threadPullRequestKeyOf,
 } from "@t3tools/client-runtime/thread-pull-requests";
@@ -11,6 +15,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { useState } from "react";
 import type {
   EnvironmentId,
+  ModelPreset,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -49,7 +54,7 @@ import {
   rankPullRequestMatches,
 } from "../pullRequest/pullRequestList.logic";
 import type { ComposerCommandItem } from "./ComposerCommandMenu";
-import { matchComposerModelItems } from "./composerModelMentions";
+import { matchComposerModelItems, matchComposerModelPresetItems } from "./composerModelMentions";
 import type { ModelEsque } from "./providerIconUtils";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import {
@@ -83,6 +88,10 @@ export function useComposerMenuItems({
   workspaceSkillsScanning,
   questionAttachmentTarget,
   modelMentions,
+  modelPresets,
+  providers,
+  subagentPresetAvailable,
+  activeAtCategory,
 }: {
   readonly composerTrigger: ComposerTrigger | null;
   readonly environmentId: EnvironmentId;
@@ -106,13 +115,23 @@ export function useComposerMenuItems({
     readonly instanceEntries: ReadonlyArray<ProviderInstanceEntry>;
     readonly modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
   };
+  readonly modelPresets: ReadonlyArray<ModelPreset>;
+  readonly providers: ReadonlyArray<ServerProvider>;
+  readonly subagentPresetAvailable: boolean;
+  readonly activeAtCategory: AtMentionCategory;
 }) {
   const gt = useGT();
   const messages = useMessages();
   // Thread mentions rank by recency as of when the composer mounted.
   const [now] = useState(() => Date.now());
   const composerTriggerKind = composerTrigger?.kind ?? null;
-  const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
+  const rawPathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
+  const parsedAtQuery = parseAtMentionQuery(rawPathTriggerQuery);
+  const atCategoryLocked = parsedAtQuery.prefix !== null;
+  const effectiveAtCategory: AtMentionCategory = atCategoryLocked
+    ? parsedAtQuery.category
+    : activeAtCategory;
+  const pathTriggerQuery = parsedAtQuery.query;
   const pullRequestTriggerQuery =
     composerTrigger?.kind === "pull-request" ? composerTrigger.query : "";
   const pullRequestTextQuery =
@@ -125,11 +144,15 @@ export function useComposerMenuItems({
   const settledPullRequestTextQuery =
     pullRequestTextQuery === debouncedPullRequestTextQuery ? pullRequestTextQuery : null;
   const isPathTrigger = composerTriggerKind === "path";
-  const environmentThreadShells = useVisibleThreadShells(isPathTrigger);
+  const wantsThreads =
+    isPathTrigger && (effectiveAtCategory === "all" || effectiveAtCategory === "thread");
+  const wantsFiles =
+    isPathTrigger && (effectiveAtCategory === "all" || effectiveAtCategory === "path");
+  const environmentThreadShells = useVisibleThreadShells(wantsThreads);
   // Mounts older settled threads matching the mention, here and on linked machines, which shells
   // may leave out.
   useThreadSearch(
-    isPathTrigger ? [environmentId, ...linkedEnvironments.keys()] : [],
+    wantsThreads ? [environmentId, ...linkedEnvironments.keys()] : [],
     pathTriggerQuery,
     { titlesOnly: true },
   );
@@ -141,11 +164,19 @@ export function useComposerMenuItems({
     ...identity,
     machine: environmentMachines.get(identity.environmentId) ?? ("server" as const),
   }));
+  const availableAtCategories: AtMentionCategory[] = [
+    "all",
+    ...(modelPresets.length > 0 ? (["preset"] as const) : []),
+    "path",
+    "thread",
+    "model",
+    ...(questionAttachmentTarget === null && offersMachines ? (["environment"] as const) : []),
+  ];
   const workspaceEntries = useComposerPathSearch(
     {
       environmentId,
-      cwd: isPathTrigger ? gitCwd : null,
-      query: isPathTrigger ? pathTriggerQuery : null,
+      cwd: wantsFiles ? gitCwd : null,
+      query: wantsFiles ? pathTriggerQuery : null,
     },
     messages,
   );
@@ -210,47 +241,88 @@ export function useComposerMenuItems({
 
   const items = ((): ComposerCommandItem[] => {
     if (!composerTrigger) return [];
+    if (composerTrigger.kind === "subagent-preset") {
+      if (!subagentPresetAvailable) return [];
+      return matchComposerModelPresetItems({
+        presets: modelPresets,
+        instanceEntries: modelMentions.instanceEntries,
+        providers,
+        query: composerTrigger.query,
+        mode: "subagent",
+        limit: 12,
+      });
+    }
     if (composerTrigger.kind === "path") {
+      const includePresets =
+        effectiveAtCategory === "all" ||
+        effectiveAtCategory === "preset" ||
+        effectiveAtCategory === "model";
+      const includeThreads = effectiveAtCategory === "all" || effectiveAtCategory === "thread";
+      const includeEnvironments =
+        questionAttachmentTarget === null &&
+        offersMachines &&
+        (effectiveAtCategory === "all" || effectiveAtCategory === "environment");
+      const includeModels = effectiveAtCategory === "all" || effectiveAtCategory === "model";
+      const includeFiles = effectiveAtCategory === "all" || effectiveAtCategory === "path";
       return [
-        ...matchComposerThreadItems(
-          {
-            shells: environmentThreadShells,
-            environmentId,
-            linkedEnvironments,
-            excludeThreadId: activeThreadId,
-            query: composerTrigger.query,
-            now,
-          },
-          messages,
-        ),
+        ...(includePresets
+          ? matchComposerModelPresetItems({
+              presets: modelPresets,
+              instanceEntries: modelMentions.instanceEntries,
+              providers,
+              query: pathTriggerQuery,
+              mode: "switch",
+              limit: effectiveAtCategory === "preset" ? 12 : 5,
+            })
+          : []),
+        ...(includeThreads
+          ? matchComposerThreadItems(
+              {
+                shells: environmentThreadShells,
+                environmentId,
+                linkedEnvironments,
+                excludeThreadId: activeThreadId,
+                query: pathTriggerQuery,
+                now,
+                allowEmptyQuery: effectiveAtCategory === "thread",
+              },
+              messages,
+            )
+          : []),
         // An answer to an agent's question carries thread links, not machines.
-        ...(questionAttachmentTarget === null && offersMachines
+        ...(includeEnvironments
           ? matchComposerEnvironmentItems(
               {
                 environments: mentionableEnvironments,
                 linkedEnvironments,
                 environmentId,
-                query: composerTrigger.query,
+                query: pathTriggerQuery,
+                allowEmptyQuery: effectiveAtCategory === "environment",
               },
               messages,
             )
           : []),
-        ...matchComposerModelItems({
-          instanceEntries: modelMentions.instanceEntries,
-          modelOptionsByInstance: modelMentions.modelOptionsByInstance,
-          query: composerTrigger.query,
-        }),
-        ...workspaceEntries.entries.map((entry) => ({
-          id: `path:${entry.kind}:${entry.path}`,
-          type: "path" as const,
-          path: entry.path,
-          pathKind: entry.kind,
-          searchTarget: workspaceEntries.searchedTarget,
-          label: basenameOfPath(entry.path).normalize("NFC"),
-          description: entry.path
-            .slice(0, Math.max(0, entry.path.lastIndexOf("/")))
-            .normalize("NFC"),
-        })),
+        ...(includeModels
+          ? matchComposerModelItems({
+              instanceEntries: modelMentions.instanceEntries,
+              modelOptionsByInstance: modelMentions.modelOptionsByInstance,
+              query: pathTriggerQuery,
+              allowEmptyQuery: effectiveAtCategory === "model",
+            })
+          : []),
+        ...(includeFiles
+          ? workspaceEntries.entries.map((entry) => ({
+              id: `path:${entry.kind}:${entry.path}`,
+              type: "path" as const,
+              path: entry.path,
+              pathKind: entry.kind,
+              searchTarget: workspaceEntries.searchedTarget,
+              label: basenameOfPath(entry.path).normalize("NFC"),
+              description: entry.path
+                .slice(0, Math.max(0, entry.path.lastIndexOf("/")))
+                .normalize("NFC"),
+            }))
+          : []),
       ];
     }
     if (composerTrigger.kind === "slash-command") {
@@ -416,7 +488,7 @@ export function useComposerMenuItems({
     return [];
   })();
   const isLoading =
-    (composerTriggerKind === "path" && workspaceEntries.isPending) ||
+    (wantsFiles && workspaceEntries.isPending) ||
     ((composerTriggerKind === "skill" || composerTriggerKind === "slash-command") &&
       workspaceSkillsScanning) ||
     (composerTriggerKind === "pull-request" &&
@@ -427,6 +499,15 @@ export function useComposerMenuItems({
         pullRequestTriggerNumber !== debouncedPullRequestNumber ||
         exactPullRequestLookup.isPending));
   const emptyState = (() => {
+    if (composerTriggerKind === "subagent-preset") {
+      if (!subagentPresetAvailable) {
+        return gt("Send a message in this thread first before starting a subagent with ^.");
+      }
+      if (modelPresets.length === 0) {
+        return gt("No model presets yet. Create one in Settings → Providers.");
+      }
+      return gt("No matching model presets.");
+    }
     if (composerTriggerKind === "skill") {
       return gt("No skills found. Try / to browse provider commands.");
     }
@@ -444,10 +525,26 @@ export function useComposerMenuItems({
         ? gt("No pull request matches {query}.", { query: composerTrigger.query })
         : gt("No pull requests found in this repository.");
     }
-    return composerTriggerKind === "path"
-      ? gt("No matching files or folders.")
-      : gt("No matching command.");
+    if (composerTriggerKind === "path") {
+      if (effectiveAtCategory === "preset") {
+        return modelPresets.length === 0
+          ? gt("No model presets yet. Create one in Settings → Providers.")
+          : gt("No matching model presets.");
+      }
+      if (effectiveAtCategory === "thread") return gt("No matching threads.");
+      if (effectiveAtCategory === "environment") return gt("No matching machines.");
+      if (effectiveAtCategory === "model") return gt("No matching models.");
+      return gt("No matching files or folders.");
+    }
+    return gt("No matching command.");
   })();
 
-  return { items, isLoading, emptyState };
+  return {
+    items,
+    isLoading,
+    emptyState,
+    effectiveAtCategory,
+    atCategoryLocked,
+    availableAtCategories,
+  };
 }

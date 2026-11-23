@@ -1,5 +1,4 @@
 import type { ThreadId } from "@t3tools/contracts";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { isNetworkPath } from "@t3tools/shared/path";
 import {
@@ -371,7 +370,6 @@ const make = Effect.gen(function* () {
   const config = yield* ServerConfig.ServerConfig;
   const isServerInternalPath = yield* makeIsServerInternalPath;
   const previewBrowser = yield* PreviewBrowser.PreviewBrowser;
-  const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
   const services = yield* Effect.context<
     FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
   >();
@@ -528,34 +526,12 @@ const make = Effect.gen(function* () {
       Effect.mapError((cause) => new HtmlRenderStoreError({ cause })),
       Effect.uninterruptible,
       Effect.andThen(measure(html)),
-      Effect.andThen((heights) => {
-        const reference: HtmlRenderReference = {
-          ...baseReference,
-          ...(heights === undefined ? {} : { heights }),
-        };
-        return mcpSessions
-          .recordHtmlRender(
-            input.threadId,
-            {
-              html: source,
-              path: "path" in input ? input.path : undefined,
-              title: input.title,
-              height: input.height,
-            },
-            reference,
-          )
-          .pipe(Effect.as(reference));
-      }),
-      // An interrupted publish must leave neither an attachment nor a recoverable reference.
-      Effect.onError(() =>
-        Effect.all(
-          [
-            fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore),
-            mcpSessions.takeHtmlRender(input.threadId, input, baseReference).pipe(Effect.ignore),
-          ],
-          { discard: true },
-        ),
-      ),
+      Effect.map((heights): HtmlRenderReference => ({
+        ...baseReference,
+        ...(heights === undefined ? {} : { heights }),
+      })),
+      // An interrupted publish must leave no orphan attachment behind.
+      Effect.onError(() => fileSystem.remove(filePath, { force: true }).pipe(Effect.ignore)),
     );
   });
 

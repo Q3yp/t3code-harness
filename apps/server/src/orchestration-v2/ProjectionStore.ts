@@ -103,7 +103,11 @@ import type * as Statement from "effect/sql/Statement";
 
 import { MCP_APP_OUTPUT_KEY } from "@t3tools/shared/mcpApp";
 import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
-import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
+import {
+  parseThreadSegmentFromAttachmentId,
+  threadHtmlRenderAttachmentIds,
+  toSafeThreadAttachmentSegment,
+} from "../attachmentStore.ts";
 import { DELEGATED_TASK_MESSAGE_CONDITION } from "./delegatedTaskMessage.ts";
 import {
   DEFERRED_COMMAND_MESSAGE_CONDITION,
@@ -1937,6 +1941,9 @@ export function threadShellFromProjection(
     interactionMode: projection.thread.interactionMode,
     branch: projection.thread.branch,
     worktreePath: projection.thread.worktreePath,
+    ...(projection.thread.activeWorkspace === undefined
+      ? {}
+      : { activeWorkspace: projection.thread.activeWorkspace }),
     pullRequests: threadPullRequestsOf(projection.thread),
     ...(projection.thread.linkedPullRequest === undefined
       ? {}
@@ -2254,6 +2261,9 @@ function shellFromState(input: {
     interactionMode: input.state.thread.interactionMode,
     branch: input.state.thread.branch,
     worktreePath: input.state.thread.worktreePath,
+    ...(input.state.thread.activeWorkspace === undefined
+      ? {}
+      : { activeWorkspace: input.state.thread.activeWorkspace }),
     pullRequests: threadPullRequestsOf(input.state.thread),
     ...(input.state.thread.linkedPullRequest === undefined
       ? {}
@@ -6874,7 +6884,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       from: number,
       through: number,
     ) {
-      const [messages, renders, answerFiles] = yield* Effect.all([
+      const [messages, renders, serverAttachments, answerFiles] = yield* Effect.all([
         sql<{ id: string }>`
       SELECT DISTINCT json_extract(attachment.value, '$.id') AS id
       FROM orchestration_v2_projection_messages AS message,
@@ -6893,6 +6903,17 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         AND ${runOrdinalBetween("item.run_id", from, through)}
     `,
         sql<{ id: string }>`
+      SELECT DISTINCT
+        COALESCE(
+          json_extract(item.payload_json, '$.htmlRender.attachmentId'),
+          json_extract(item.payload_json, '$.attachmentId')
+        ) AS id
+      FROM orchestration_v2_projection_turn_items AS item
+      WHERE item.thread_id = ${threadId}
+        AND item.type IN ('html_render', 'preview_recording')
+        AND ${runOrdinalBetween("item.run_id", from, through)}
+    `,
+        sql<{ id: string }>`
       SELECT DISTINCT json_extract(attachment.value, '$.id') AS id
       FROM orchestration_v2_projection_turn_items AS item,
         json_each(item.payload_json, '$.questionAnswer.attachmentsByQuestionId') AS question,
@@ -6902,9 +6923,20 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         AND ${runOrdinalBetween("item.run_id", from, through)}
     `,
       ]);
+      const segment = toSafeThreadAttachmentSegment(threadId);
+      const ownedServerAttachmentIds =
+        segment === null
+          ? []
+          : serverAttachments
+              .map((row) => row.id)
+              .filter(
+                (id): id is string =>
+                  typeof id === "string" && parseThreadSegmentFromAttachmentId(id) === segment,
+              );
       return [
         ...messages.map((row) => row.id),
         ...answerFiles.map((row) => row.id),
+        ...ownedServerAttachmentIds,
         ...threadHtmlRenderAttachmentIds(
           threadId,
           renders.map((row) => {

@@ -24,6 +24,7 @@ import {
   type GitManagerServiceError,
   TaskFolderError,
   TextGenerationError,
+  type ThreadActiveWorkspace,
   ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
@@ -110,6 +111,7 @@ export interface ThreadLaunchInput {
   readonly runtimeMode: RuntimeMode;
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
+  readonly activeWorkspace?: ThreadActiveWorkspace | null;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -1479,6 +1481,9 @@ const make = Effect.gen(function* () {
                 commandId: input.commandId,
                 threadId: candidateThreadId,
                 expectedEmpty: true,
+                ...(input.activeWorkspace === undefined
+                  ? {}
+                  : { activeWorkspace: input.activeWorkspace }),
               })
             : threads.dispatch({
                 type: "thread.create",
@@ -1492,6 +1497,9 @@ const make = Effect.gen(function* () {
                 interactionMode: input.interactionMode,
                 branch: initialBranch,
                 worktreePath: initialWorktreePath,
+                ...(input.activeWorkspace === undefined
+                  ? {}
+                  : { activeWorkspace: input.activeWorkspace }),
                 ...(input.importedNativeThread === undefined
                   ? {}
                   : { importedNativeThread: input.importedNativeThread }),

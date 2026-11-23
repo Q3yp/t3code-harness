@@ -380,6 +380,23 @@ export type ModelPreferences = {
   readonly providerModelPreferences: typeof ProviderModelPreferences.Type;
 };
 
+/** Compact token-safe preset name for `@preset` model switching and `^preset` subagent calls. */
+export const MODEL_PRESET_NAME_PATTERN = /^[^\s@#^/$:,;()[\]"'`]+$/u;
+export const MAX_MODEL_PRESETS = 100;
+export const ModelPresetName = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(64),
+  Schema.isPattern(MODEL_PRESET_NAME_PATTERN),
+);
+export type ModelPresetName = typeof ModelPresetName.Type;
+
+export const ModelPreset = Schema.Struct({
+  name: ModelPresetName,
+  modelSelection: ModelSelection,
+});
+export type ModelPreset = typeof ModelPreset.Type;
+export const ModelPresets = Schema.Array(ModelPreset).check(Schema.isMaxLength(MAX_MODEL_PRESETS));
+export type ModelPresets = typeof ModelPresets.Type;
+
 export const VoiceShortcutMode = Schema.Literals(["auto", "hold", "toggle"]);
 export type VoiceShortcutMode = typeof VoiceShortcutMode.Type;
 
@@ -1383,6 +1400,7 @@ export const ServerSettings = Schema.Struct({
   providerModelPreferences: Schema.NullOr(ProviderModelPreferences).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  modelPresets: ModelPresets.pipe(Schema.withDecodingDefault(Effect.succeed([]))),
   worktreeCleanup: WorktreeCleanup.pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   storageCleanup: StorageCleanupSettings.pipe(
     Schema.withDecodingDefault(Effect.succeed(Schema.decodeSync(StorageCleanupSettings)({}))),
@@ -1834,6 +1852,7 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
   favorites: Schema.optionalKey(ModelFavorites),
   providerModelPreferences: Schema.optionalKey(ProviderModelPreferences),
+  modelPresets: Schema.optionalKey(ModelPresets),
   // Applied under the settings service's write lock, only while still unset.
   migrateModelPreferences: Schema.optionalKey(
     Schema.Struct({

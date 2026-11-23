@@ -113,6 +113,15 @@ import {
   WorkspaceTaskFolderResult,
 } from "./workspaceFolders.ts";
 import {
+  AgentWorkspaceError,
+  AgentWorkspaceListInput,
+  AgentWorkspaceListResult,
+  AgentWorkspaceRegisterInput,
+  AgentWorkspaceRegisterResult,
+  AgentWorkspaceUnregisterInput,
+  AgentWorkspaceUnregisterResult,
+} from "./agentWorkspace.ts";
+import {
   AgentSessionImportInput,
   AgentSessionImportProjectChangedError,
   AgentSessionImportProjectNotFoundError,
@@ -502,6 +511,9 @@ export const WS_METHODS = {
   workspaceScanFolders: "workspace.scanFolders",
   workspaceTaskFolder: "workspace.taskFolder",
   workspaceAddTaskFolderRepository: "workspace.addTaskFolderRepository",
+  agentWorkspacesList: "agentWorkspaces.list",
+  agentWorkspacesRegister: "agentWorkspaces.register",
+  agentWorkspacesUnregister: "agentWorkspaces.unregister",
   filesystemGetMetadata: "filesystem.getMetadata",
   agentSessionsScan: "agentSessions.scan",
   agentSessionsImport: "agentSessions.import",
@@ -1727,6 +1739,24 @@ const WsWorkspaceAddTaskFolderRepositoryRpc = Rpc.make(
   },
 );
 
+const WsAgentWorkspacesListRpc = Rpc.make(WS_METHODS.agentWorkspacesList, {
+  payload: AgentWorkspaceListInput,
+  success: AgentWorkspaceListResult,
+  error: Schema.Union([AgentWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+const WsAgentWorkspacesRegisterRpc = Rpc.make(WS_METHODS.agentWorkspacesRegister, {
+  payload: AgentWorkspaceRegisterInput,
+  success: AgentWorkspaceRegisterResult,
+  error: Schema.Union([AgentWorkspaceError, EnvironmentAuthorizationError]),
+});
+
+const WsAgentWorkspacesUnregisterRpc = Rpc.make(WS_METHODS.agentWorkspacesUnregister, {
+  payload: AgentWorkspaceUnregisterInput,
+  success: AgentWorkspaceUnregisterResult,
+  error: Schema.Union([AgentWorkspaceError, EnvironmentAuthorizationError]),
+});
+
 const WsAgentSessionsScanRpc = Rpc.make(WS_METHODS.agentSessionsScan, {
   payload: AgentSessionScanInput,
   success: AgentSessionScanResult,
@@ -2716,4 +2746,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2SubscribeThreadRpc,
   WsOrchestrationV2SubscribeCommandOutputRpc,
   WsOrchestrationV2SubscribePromptSuggestionRpc,
+  WsAgentWorkspacesListRpc,
+  WsAgentWorkspacesRegisterRpc,
+  WsAgentWorkspacesUnregisterRpc,
 ).middleware(RpcScopeAuthorization);

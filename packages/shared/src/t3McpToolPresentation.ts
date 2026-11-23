@@ -441,6 +441,20 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
   html_preview: tool(["Preview", "Previewing", "Previewed", "an HTML page"], "html-preview"),
   html_render: tool(["Render", "Rendering", "Rendered", "an HTML page"], "html-render"),
   send_to_user: tool(["Send", "Sending", "Sent", "a message"], "send-to-user"),
+  workspace_list: tool(["List", "Listing", "Listed", "workspaces"], "project-list"),
+  workspace_activate: tool(
+    ["Activate", "Activating", "Activated", "a workspace"],
+    "worktree-handoff",
+  ),
+  workspace_clear: tool(["Clear", "Clearing", "Cleared", "the workspace"], "worktree-handoff"),
+  workspace_register: tool(
+    ["Register", "Registering", "Registered", "a workspace"],
+    "project-create",
+  ),
+  workspace_unregister: tool(
+    ["Unregister", "Unregistering", "Unregistered", "a workspace"],
+    "project-delete",
+  ),
 };
 
 export const T3_MCP_TOOL_NAMES: ReadonlySet<string> = new Set(Object.keys(T3_MCP_TOOLS));

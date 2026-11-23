@@ -73,9 +73,19 @@ import {
   ChevronDownIcon,
   FolderIcon,
   FolderPlusIcon,
+  LayersIcon,
   PlusIcon,
   SettingsIcon,
 } from "lucide-react";
+import {
+  encodeWorkspaceScopeKey,
+  findContainingAgentWorkspace,
+  isPathWithinWorkspace,
+  isWorkspaceScopeKey,
+  parseWorkspaceScopeKey,
+  workspacePathsEqual,
+} from "~/lib/agentWorkspaces";
+import { useEnvironmentAgentWorkspaces } from "~/state/agentWorkspaces";
 import {
   useEffect,
   useLayoutEffect,
@@ -182,6 +192,8 @@ import {
 import {
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
+  threadMatchesWorkspaceScopes,
+  type SidebarWorkspaceScope,
   groupSidebarThreadsByProject,
   sidebarFolderExpansionKeys,
   buildBulkTitleRegenerationContextMenuItem,
@@ -363,6 +375,7 @@ type SidebarOptimisticDrop = {
 interface SidebarThreadPartitionInput {
   readonly threads: readonly EnvironmentThreadShell[];
   readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly scopedWorkspaces: ReadonlyArray<SidebarWorkspaceScope>;
   /** Tasks linked environments run for a listed thread; they show under it. */
   readonly delegatedUnderParent: ReadonlySet<string>;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
@@ -430,6 +443,7 @@ function routeThreadOnly(
 function useSidebarThreads(input: {
   readonly projectScopeKey: string | null;
   readonly scopedProjectKeys: ReadonlySet<string> | null;
+  readonly scopedWorkspaces: ReadonlyArray<SidebarWorkspaceScope>;
   readonly serverConfigs: ReadonlyMap<EnvironmentId, EnvironmentServerConfig>;
   readonly connectedEnvironmentIds: readonly EnvironmentId[];
   readonly optimisticDrop: SidebarOptimisticDrop | null;
@@ -445,6 +459,7 @@ function useSidebarThreads(input: {
   const {
     projectScopeKey,
     scopedProjectKeys,
+    scopedWorkspaces,
     serverConfigs,
     connectedEnvironmentIds,
     optimisticDrop,
@@ -497,6 +512,7 @@ function useSidebarThreads(input: {
   const partition = partitionSidebarThreads({
     threads,
     scopedProjectKeys,
+    scopedWorkspaces,
     delegatedUnderParent,
     serverConfigs,
     connectedEnvironmentIds,
@@ -633,6 +649,7 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
   const {
     threads,
     scopedProjectKeys,
+    scopedWorkspaces,
     delegatedUnderParent,
     serverConfigs,
     optimisticDrop,
@@ -640,7 +657,12 @@ function partitionSidebarThreads(input: SidebarThreadPartitionInput) {
     sortActiveBySend,
   } = input;
   const preciseNow = new Date().toISOString();
-  const visible = filterSidebarV2VisibleThreads(threads, scopedProjectKeys, delegatedUnderParent);
+  const visible = filterSidebarV2VisibleThreads(
+    threads,
+    scopedProjectKeys,
+    delegatedUnderParent,
+    scopedWorkspaces,
+  );
   const inboxObservation = inboxReturns.observe(workingShelfEnabled ? threads : null);
   const pinned: EnvironmentThreadShell[] = [];
   const active: EnvironmentThreadShell[] = [];
@@ -824,9 +846,12 @@ function useSidebarLookups() {
   const gt = useGT();
   const projects = useProjects();
   const environments = useEnvironmentIdentities();
+  const primaryEnvironmentId = usePrimaryEnvironmentId();
   const serverConfigs = useServerConfigs();
   const providerEntriesByEnvironment = useAtomValue(sidebarProviderEntriesAtom);
   const projectGroups = useSidebarProjectGroups();
+  const { workspaces: primaryAgentWorkspaces } =
+    useEnvironmentAgentWorkspaces(primaryEnvironmentId);
   const environmentLabelById = new Map(
     environments.map((environment) => [environment.environmentId, environment.label] as const),
   );
@@ -843,14 +868,67 @@ function useSidebarLookups() {
   const projectGroupByScopeKey = new Map(
     projectGroups.map((project) => [project.projectKey, project] as const),
   );
-  const projectScopeItems = [
+  const workspaceByScopeKey = new Map(
+    primaryEnvironmentId === null
+      ? []
+      : primaryAgentWorkspaces.map((workspace) => [
+          encodeWorkspaceScopeKey(primaryEnvironmentId, workspace.path),
+          { environmentId: primaryEnvironmentId, workspace },
+        ]),
+  );
+  const pickableGroups = pickableProjectGroups(projectGroups);
+  const nestedProjectsByWorkspaceKey = new Map<string, Array<(typeof pickableGroups)[number]>>();
+  const standaloneProjectGroups: Array<(typeof pickableGroups)[number]> = [];
+  for (const group of pickableGroups) {
+    const primaryMember =
+      primaryEnvironmentId === null
+        ? null
+        : (group.memberProjects.find((member) => member.environmentId === primaryEnvironmentId) ??
+          null);
+    const containing = primaryMember
+      ? findContainingAgentWorkspace(primaryMember.workspaceRoot, primaryAgentWorkspaces)
+      : null;
+    if (
+      containing &&
+      primaryEnvironmentId !== null &&
+      primaryMember &&
+      !workspacePathsEqual(primaryMember.workspaceRoot, containing.path)
+    ) {
+      const scopeKey = encodeWorkspaceScopeKey(primaryEnvironmentId, containing.path);
+      const list = nestedProjectsByWorkspaceKey.get(scopeKey) ?? [];
+      list.push(group);
+      nestedProjectsByWorkspaceKey.set(scopeKey, list);
+    } else {
+      standaloneProjectGroups.push(group);
+    }
+  }
+  const projectScopeItems: Array<{
+    readonly value: string;
+    readonly label: string;
+    readonly nestedUnderWorkspace?: boolean;
+  }> = [
     { value: ADD_PROJECT_SCOPE_ITEM_VALUE, label: gt("Add project") },
     { value: "all", label: gt("All projects") },
-    ...pickableProjectGroups(projectGroups).map((project) => ({
+  ];
+  if (primaryEnvironmentId !== null) {
+    for (const workspace of primaryAgentWorkspaces) {
+      const workspaceKey = encodeWorkspaceScopeKey(primaryEnvironmentId, workspace.path);
+      projectScopeItems.push({ value: workspaceKey, label: workspace.name });
+      for (const project of nestedProjectsByWorkspaceKey.get(workspaceKey) ?? []) {
+        projectScopeItems.push({
+          value: project.projectKey,
+          label: project.displayName,
+          nestedUnderWorkspace: true,
+        });
+      }
+    }
+  }
+  for (const project of standaloneProjectGroups) {
+    projectScopeItems.push({
       value: project.projectKey,
       label: project.displayName,
-    })),
-  ];
+    });
+  }
   return {
     projects,
     serverConfigs,
@@ -860,6 +938,7 @@ function useSidebarLookups() {
     projectByKey,
     projectDisplayNameByKey,
     projectGroupByScopeKey,
+    workspaceByScopeKey,
     projectScopeItems,
   };
 }
@@ -929,6 +1008,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectByKey,
     projectDisplayNameByKey,
     projectGroupByScopeKey,
+    workspaceByScopeKey,
     projectScopeItems: lookupProjectScopeItems,
   } = useSidebarLookups();
   const delegatedUnderParent = useDelegatedUnderParent();
@@ -1100,25 +1180,45 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const archivedProjectKeys = new Set(
     projectGroups.filter((project) => project.archived).map((project) => project.projectKey),
   );
-  const chosenProjectScopeKeys = resolveSidebarProjectScopeKeys({
+  const persistedWorkspaceScopeKeys = persistedProjectScopeKeys.filter(isWorkspaceScopeKey);
+  const resolvedProjectScopeKeys = resolveSidebarProjectScopeKeys({
     groups: projectGroups,
-    keys: persistedProjectScopeKeys,
+    keys: persistedProjectScopeKeys.filter((key) => !isWorkspaceScopeKey(key)),
     settings: projectGroupingSettings,
     canClearMissingScope: allProjectSnapshotsReady && allProjectConfigsReady,
   }).filter((key) => !archivedProjectKeys.has(key));
+  const chosenWorkspaceScopes: ReadonlyArray<SidebarWorkspaceScope> =
+    persistedWorkspaceScopeKeys.flatMap((key) => {
+      const parsed = parseWorkspaceScopeKey(key);
+      return parsed ? [parsed] : [];
+    });
+  const chosenProjectScopeKeys = [...persistedWorkspaceScopeKeys, ...resolvedProjectScopeKeys];
   const chosenProjectGroups = scopeGroups.filter((project) =>
-    chosenProjectScopeKeys.includes(project.projectKey),
+    resolvedProjectScopeKeys.includes(project.projectKey),
   );
+  const workspaceNestedProjectKeys =
+    chosenWorkspaceScopes.length === 0
+      ? []
+      : projects
+          .filter((project) =>
+            chosenWorkspaceScopes.some(
+              (scope) =>
+                scope.environmentId === project.environmentId &&
+                isPathWithinWorkspace(project.workspaceRoot, scope.normalizedPath),
+            ),
+          )
+          .map((project) => `${project.environmentId}:${project.id}`);
   const chosenScopeProjectKeys =
-    chosenProjectGroups.length === 0
+    chosenProjectGroups.length === 0 && workspaceNestedProjectKeys.length === 0
       ? null
-      : new Set(
-          chosenProjectGroups.flatMap((project) =>
+      : new Set([
+          ...chosenProjectGroups.flatMap((project) =>
             project.memberProjectRefs.map(
               (projectRef) => `${projectRef.environmentId}:${projectRef.projectId}`,
             ),
           ),
-        );
+          ...workspaceNestedProjectKeys,
+        ]);
   const threads = useQuietThreadShells();
   const promotingDraftThreadKeys = usePromotingDraftThreadKeys();
   const listedThreads =
@@ -1148,6 +1248,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     routeKeyInPlace,
     isSearching: isSearchingThreads,
     scopedProjectKeys: chosenScopeProjectKeys,
+    scopedWorkspaces: chosenWorkspaceScopes,
     delegatedUnderParent,
     findThread: (key) => threads.find((candidate) => threadShellKey(candidate) === key),
   });
@@ -1196,6 +1297,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       projectScopeFilter.contains(item, query, (candidate) => candidate.label),
   });
   const scopedProjectGroups = revealWidensScope ? [] : chosenProjectGroups;
+  const scopedWorkspaces = revealWidensScope ? [] : chosenWorkspaceScopes;
+  const scopedWorkspaceEntries = scopedWorkspaces.flatMap((scope) => {
+    const entry = workspaceByScopeKey.get(
+      encodeWorkspaceScopeKey(scope.environmentId, scope.normalizedPath),
+    );
+    return entry ? [entry] : [];
+  });
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
   const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
   const threadSearch = useThreadSearch(
@@ -1220,8 +1328,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         continue;
       }
       if (
-        scopedProjectKeys !== null &&
-        !scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)
+        (scopedProjectKeys !== null || scopedWorkspaces.length > 0) &&
+        !(
+          (scopedProjectKeys !== null &&
+            scopedProjectKeys.has(`${session.environmentId}:${session.projectId}`)) ||
+          threadMatchesWorkspaceScopes(session, scopedWorkspaces)
+        )
       ) {
         continue;
       }
@@ -1355,6 +1467,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   } = useSidebarThreads({
     projectScopeKey,
     scopedProjectKeys,
+    scopedWorkspaces,
     serverConfigs,
     connectedEnvironmentIds,
     optimisticDrop,
@@ -1455,6 +1568,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     scopedProjectKeys,
     routeDraftIdForRows,
     draftTerminalLabels,
+    scopedWorkspaces,
   );
   // Draft rows sit above the threads, so jumps and traversal reach them first.
   // Search hides them, so they drop out while it is open.
@@ -3104,18 +3218,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     render={
                       <SidebarHeaderIconButton
                         label={
-                          scopedProjectGroups.length > 0
+                          scopedWorkspaceEntries.length > 0 || scopedProjectGroups.length > 0
                             ? gt("Projects: {projects}", {
-                                projects: scopedProjectGroups
-                                  .map((project) => project.displayName)
-                                  .join(", "),
+                                projects: [
+                                  ...scopedWorkspaceEntries.map((entry) => entry.workspace.name),
+                                  ...scopedProjectGroups.map((project) => project.displayName),
+                                ].join(", "),
                               })
                             : gt("Projects")
                         }
                       />
                     }
                   >
-                    {scopedProjectGroups.length > 1 ? (
+                    {scopedWorkspaceEntries.length > 0 && scopedProjectGroups.length === 0 ? (
+                      <LayersIcon className="size-4 text-primary" />
+                    ) : scopedProjectGroups.length > 1 ? (
                       <span className="flex shrink-0">
                         {scopedProjectGroups.slice(0, 2).map((project, index) => (
                           <span
@@ -3207,10 +3324,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             </ComboboxItem>
                           );
                         }
+                        const workspaceEntry = workspaceByScopeKey.get(item.value) ?? null;
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
-                        const isSelected = project
-                          ? projectScopeKeys.includes(item.value)
-                          : projectScopeKeys.length === 0;
+                        const isSelected =
+                          workspaceEntry || project
+                            ? projectScopeKeys.includes(item.value)
+                            : projectScopeKeys.length === 0;
                         return (
                           <ComboboxItem
                             key={item.value}
@@ -3223,14 +3342,28 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                               if (project) handleProjectSettings(event, project);
                             }}
                           >
+                            {item.nestedUnderWorkspace ? (
+                              <span className="w-3 shrink-0" aria-hidden />
+                            ) : null}
                             <ProjectScopeRowIcon isSelected={isSelected}>
-                              {project ? (
+                              {workspaceEntry ? (
+                                <LayersIcon className="size-4 shrink-0 text-primary" />
+                              ) : project ? (
                                 <ProjectFavicon project={project} className="size-4 shrink-0" />
                               ) : (
                                 <FolderIcon className="size-4 shrink-0" />
                               )}
                             </ProjectScopeRowIcon>
-                            <span className="min-w-0 truncate text-sm">{item.label}</span>
+                            {workspaceEntry ? (
+                              <span className="flex min-w-0 flex-1 flex-col">
+                                <span className="truncate font-medium text-sm">{item.label}</span>
+                                <span className="truncate text-2xs text-muted-foreground">
+                                  {workspaceEntry.workspace.description}
+                                </span>
+                              </span>
+                            ) : (
+                              <span className="min-w-0 truncate text-sm">{item.label}</span>
+                            )}
                             {project && showProjectEnvironments ? (
                               <ProjectEnvironmentBadge
                                 group={project}

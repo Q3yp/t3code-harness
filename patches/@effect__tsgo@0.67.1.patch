@@ -1,0 +1,38 @@
+diff --git a/dist/effect-tsgo.cjs b/dist/effect-tsgo.cjs
+index 88bd194d6d0799750d9b93aceb2224d1e80b1c8e..5213e663f59fda60c23585033710e15d5520c5c7 100644
+--- a/dist/effect-tsgo.cjs
++++ b/dist/effect-tsgo.cjs
+@@ -210547,13 +210547,28 @@ const packagedTsrs = (context, requested) => gen(function* () {
+ 	const fs = yield* FileSystem;
+ 	const path = yield* Path$2;
+ 	if (context.platform === "linux" && !context.isGlibc()) return yield* new ProxyError({ reason: `Linux musl is not supported by the packaged tsrs integration; it is built for ${tsrsReplacementTargets.join(", ")}.` });
+-	const target = tsrsTarget(context.platform, context.arch, true);
++	let tsrsContext = context;
++	let target = tsrsTarget(context.platform, context.arch, true);
++	if ((target === void 0 || !tsrsReplacementTargets.includes(target)) && context.platform === "win32" && context.arch === "arm64") {
++		let fallbackPackageJson;
++		try {
++			fallbackPackageJson = node_module.createRequire(require("url").pathToFileURL(__filename).href).resolve("@effect/tsgo-win32-x64/package.json");
++		} catch {}
++		if (fallbackPackageJson !== void 0) {
++			tsrsContext = {
++				...context,
++				arch: "x64",
++				packageDirectory: path.dirname(fallbackPackageJson)
++			};
++			target = tsrsTarget("win32", "x64", true);
++		}
++	}
+ 	if (target === void 0 || !tsrsReplacementTargets.includes(target)) return yield* new ProxyError({ reason: `The packaged tsrs integration is not available for ${context.platform}-${context.arch}; it is built for ${tsrsReplacementTargets.join(", ")}.` });
+-	const executable = yield* requireArtifact(yield* tsrsExecutable(context, yield* selectVersion("tsrs", "tsrs", requested, requested === void 0 ? yield* installedTsrsVersion(context) : void 0)));
++	const executable = yield* requireArtifact(yield* tsrsExecutable(tsrsContext, yield* selectVersion("tsrs", "tsrs", requested, requested === void 0 ? yield* installedTsrsVersion(tsrsContext) : void 0)));
+ 	const libraryPath = path.join(path.dirname(executable), "lib.d.ts");
+-	if (!(yield* fs.exists(libraryPath).pipe(mapError(toProxyError)))) return yield* new ProxyError({ reason: `Missing ${libraryPath}: tsrs needs its lib*.d.ts files next to the packaged binary ${executable}. Reinstall @effect/tsgo-${context.platform}-${context.arch}.` });
+-	yield* ensureExecutable(executable, context.platform);
+-	return executablePath(executable, context.platform);
++	if (!(yield* fs.exists(libraryPath).pipe(mapError(toProxyError)))) return yield* new ProxyError({ reason: `Missing ${libraryPath}: tsrs needs its lib*.d.ts files next to the packaged binary ${executable}. Reinstall @effect/tsgo-${tsrsContext.platform}-${tsrsContext.arch}.` });
++	yield* ensureExecutable(executable, tsrsContext.platform);
++	return executablePath(executable, tsrsContext.platform);
+ });
+ const resolveTsrs = (context, invocation) => gen(function* () {
+ 	yield* rejectTsrsLint(invocation);

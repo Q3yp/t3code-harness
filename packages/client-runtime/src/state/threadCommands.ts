@@ -52,6 +52,7 @@ import {
   setThreadAutoSettle,
   settleThread,
   snoozeThread,
+  startDelegatedSubagent,
   startThreadTurn,
   stopThreadSession,
   unarchiveThread,
@@ -353,6 +354,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     startTurn: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:start-turn",
       execute: startThreadTurn,
+      scheduler,
+      concurrency,
+    }),
+    startDelegatedSubagent: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:start-delegated-subagent",
+      execute: startDelegatedSubagent,
       scheduler,
       concurrency,
     }),

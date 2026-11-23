@@ -85,7 +85,9 @@ function textKey(
     text:
       item.type === "proposed_plan"
         ? item.markdown
-        : item.type === "user_message" || item.type === "assistant_message"
+        : item.type === "user_message" ||
+            item.type === "assistant_message" ||
+            item.type === "sent_message"
           ? item.text
           : "",
     role:
@@ -362,9 +364,13 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       const candidates = index
         .map((row, position) => ({ ...row, position }))
         .filter((row) =>
-          ["user_message", "assistant_message", "proposed_plan", "user_input_request"].includes(
-            row.item.type,
-          ),
+          [
+            "user_message",
+            "assistant_message",
+            "sent_message",
+            "proposed_plan",
+            "user_input_request",
+          ].includes(row.item.type),
         );
       const loadAll = Effect.fnUntraced(function* (rows: readonly FindRow[]) {
         const loaded: FindPayload[] = [];
@@ -387,7 +393,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
           .map((row, position) => ({ ...row, position }))
           .filter(
             (row) =>
-              row.item.type === "dynamic_tool" &&
+              (row.item.type === "dynamic_tool" || row.item.type === "html_render") &&
               row.item.runId !== null &&
               emptyReplyRunIds.has(row.item.runId),
           ),
@@ -434,9 +440,10 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
         for (const payload of toolPayloads) {
           const { item } = yield* decode(payload);
           if (
-            item.type === "dynamic_tool" &&
-            ((item.status === "completed" && htmlRenderFromToolItem(item)) ||
-              mcpAppFromToolItem(item))
+            item.type === "html_render" ||
+            (item.type === "dynamic_tool" &&
+              ((item.status === "completed" && htmlRenderFromToolItem(item)) ||
+                mcpAppFromToolItem(item)))
           )
             embeddedResultRunIds.add(item.runId);
         }

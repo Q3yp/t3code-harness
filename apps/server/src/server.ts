@@ -143,6 +143,7 @@ import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
 import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as TaskFolderStore from "./workspace/TaskFolderStore.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
+import * as AgentWorkspaceService from "./workspace/AgentWorkspaceService.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -498,6 +499,7 @@ const layerProjectCloneTracker = ProjectCloneTracker.layer.pipe(
 const layerKnownWorkspaces = KnownWorkspaces.layer.pipe(
   Layer.provide(ProjectStore.layer),
   Layer.provide(GitVcsDriver.layer),
+  Layer.provide(AgentWorkspaceService.layer),
 );
 
 const layerReview = ReviewService.layer.pipe(
@@ -566,6 +568,7 @@ const layerWorkspaceFileSystem = WorkspaceFileSystem.layer.pipe(
 );
 
 const layerWorkspace = Layer.mergeAll(
+  AgentWorkspaceService.layer,
   WorkspacePaths.layer,
   layerWorkspaceEntries,
   layerWorkspaceFileSystem,

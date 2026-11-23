@@ -1,8 +1,7 @@
 // @effect-diagnostics nodeBuiltinImport:off - plain local servers stand in for LAN services.
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
-import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
+import { ThreadId } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as Deferred from "effect/Deferred";
@@ -46,7 +45,6 @@ const layerHtmlRender = (
         }),
       ),
     ),
-    Layer.provideMerge(McpProviderSessions.layer),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix: "t3-html-render-" })),
     Layer.provideMerge(NodeServices.layer),
   );
@@ -191,18 +189,7 @@ describe("HtmlRender", () => {
       const fileSystem = yield* FileSystem.FileSystem;
       const config = yield* ServerConfig.ServerConfig;
       const htmlRender = yield* HtmlRender.HtmlRender;
-      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
       const threadId = ThreadId.make("thread-html-render");
-      const session = {
-        environmentId: EnvironmentId.make("html-render-environment"),
-        threadId,
-        providerSessionId: "first-credential",
-        providerInstanceId: ProviderInstanceId.make("claude"),
-        endpoint: "http://localhost:8311/mcp",
-        authorizationHeader: "Bearer first-token",
-        browserToolsAvailable: false,
-      };
-      yield* mcpSessions.set(session);
 
       const reference = yield* htmlRender.publish({
         threadId,
@@ -224,54 +211,15 @@ describe("HtmlRender", () => {
       const html = yield* fileSystem.readFileString(stored ?? "");
       expect(html).toContain('<style id="t3-theme">');
       expect(html).toContain("<p>Quarterly revenue</p>");
-      // Antigravity reports the call without its result, so the thread's
-      // provider session keeps the page for one call with these arguments.
-      const page = {
-        html: `<p>Quarterly revenue</p>${" ".repeat(8_000)}`,
-        title: "  Revenue  ",
-        height: 9_000,
-      };
-      expect(
-        yield* mcpSessions.takeHtmlRender(threadId, {
-          ...page,
-          html: page.html.replace("revenue", "expense"),
-        }),
-      ).toBe(undefined);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toEqual(reference);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toBe(undefined);
-      const reused = yield* htmlRender.publish({ threadId, ...page });
-      yield* mcpSessions.set({ ...session, browserToolsAvailable: true });
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toEqual(reused);
-      const first = yield* htmlRender.publish({ threadId, ...page });
-      const second = yield* htmlRender.publish({ threadId, ...page });
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toEqual(first);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toEqual(second);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toBe(undefined);
-
-      yield* htmlRender.publish({ threadId, ...page });
-      yield* mcpSessions.set({
-        ...session,
-        providerSessionId: "replacement-credential",
-        providerInstanceId: ProviderInstanceId.make("antigravity"),
-        authorizationHeader: "Bearer replacement-token",
-      });
-      const replacement = yield* htmlRender.publish({ threadId, ...page });
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toEqual(replacement);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toBe(undefined);
-      // Clearing the thread's MCP session drops the pages it kept.
-      yield* htmlRender.publish({ threadId, ...page });
-      yield* mcpSessions.clear(threadId);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toBe(undefined);
     }).pipe(Effect.provide(layerTest)),
   );
 
-  it.effect("publishes a page from an .html file as a snapshot that path calls recover", () =>
+  it.effect("publishes a page from an .html file as an immutable snapshot", () =>
     Effect.gen(function* () {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const config = yield* ServerConfig.ServerConfig;
       const htmlRender = yield* HtmlRender.HtmlRender;
-      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
       const threadId = ThreadId.make("thread-html-path");
       const directory = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-html-page-" });
       const file = path.join(directory, "report.html");
@@ -281,8 +229,6 @@ describe("HtmlRender", () => {
       const first = yield* htmlRender.publish({ threadId, ...page });
       yield* fileSystem.writeFileString(file, "<!doctype html><p>Second draft</p>");
       const second = yield* htmlRender.publish({ threadId, ...page });
-      const inline = { html: "<!doctype html><p>First draft</p>", title: "Report", height: 300 };
-      const inlineReference = yield* htmlRender.publish({ threadId, ...inline });
 
       const stored = yield* fileSystem.readFileString(
         resolveAttachmentPathById({
@@ -291,18 +237,7 @@ describe("HtmlRender", () => {
         }) ?? "",
       );
       expect(stored).toContain("<p>First draft</p>");
-      expect(yield* mcpSessions.takeHtmlRender(threadId, { ...page, path: `${file}x` })).toBe(
-        undefined,
-      );
-      for (const html of [inline.html, false]) {
-        expect(yield* mcpSessions.takeHtmlRender(threadId, { ...page, html })).toBe(undefined);
-      }
-      expect(yield* mcpSessions.takeHtmlRender(threadId, { ...inline, path: null })).toEqual(
-        inlineReference,
-      );
-      expect(yield* mcpSessions.takeHtmlRender(threadId, { ...page, html: null })).toEqual(first);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toEqual(second);
-      expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toBe(undefined);
+      expect(second.attachmentId).not.toBe(first.attachmentId);
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -387,7 +322,6 @@ describe("HtmlRender", () => {
         const fileSystem = yield* FileSystem.FileSystem;
         const config = yield* ServerConfig.ServerConfig;
         const htmlRender = yield* HtmlRender.HtmlRender;
-        const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
         const storedPages = fileSystem
           .readDirectory(config.attachmentsDir, { recursive: true })
           .pipe(Effect.map((names) => names.filter((name) => name.endsWith(".html"))));
@@ -397,7 +331,6 @@ describe("HtmlRender", () => {
         expect(yield* storedPages).toHaveLength(1);
         yield* Fiber.interrupt(publishing);
         expect(yield* storedPages).toEqual([]);
-        expect(yield* mcpSessions.takeHtmlRender(threadId, page)).toBe(undefined);
       }).pipe(
         Effect.provide(
           layerHtmlRender(

@@ -17,7 +17,6 @@ import {
   ThreadId,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
-import { htmlRenderFromToolItem } from "@t3tools/shared/toolOutput";
 import * as Cause from "effect/Cause";
 import * as DateTime from "effect/DateTime";
 import * as Deferred from "effect/Deferred";
@@ -1273,14 +1272,12 @@ describe("KiroAdapterV2 MCP tools", () => {
   // Probed live on Kiro 2.33.1 against a stdio MCP server named t3-code, without
   // the permission round trip. Kiro titles the call "@t3-code/html_render", names
   // it in `tool_id`, and keeps only the result's text.
-  it.effect("shows T3's html_render as T3's tool with the page T3 published", () =>
+  it.effect("shows T3's html_render as T3's tool", () =>
     Effect.gen(function* () {
-      const mcpSessions = yield* McpProviderSessions.McpProviderSessions;
       const toolCallId = "tooluse_4N3LnlI9PRlphUtzdBQGDD";
       const args = { html: "<p>hi</p>", title: "Probe", height: 120 };
       const rawInput = { tool_id: "t3-code::html_render", arguments: args };
       const kiroMeta = { kiro: { serverName: "t3-code", toolOrigin: "default" } };
-      const page = { attachmentId: "kiro-mcp-html-render-page", title: "Probe", height: 120 };
       yield* runKiroScript({
         scenario: "mcp-html-render",
         frames: [
@@ -1320,12 +1317,6 @@ describe("KiroAdapterV2 MCP tools", () => {
         ],
         drive: ({ events, startTurn }) =>
           Effect.gen(function* () {
-            // T3's MCP server records the page when Kiro calls html_render.
-            yield* mcpSessions.recordHtmlRender(
-              ThreadId.make("thread-kiro-mcp-html-render"),
-              args,
-              page,
-            );
             yield* startTurn;
             const turn = yield* collectTurn(events);
             const items = turn.flatMap((event) =>
@@ -1342,10 +1333,6 @@ describe("KiroAdapterV2 MCP tools", () => {
             );
             assert.equal(completed?.status, "completed");
             assert.deepEqual(completed?.input, args);
-            assert.deepEqual(
-              completed === undefined ? undefined : htmlRenderFromToolItem(completed),
-              page,
-            );
           }),
       });
     }).pipe(Effect.provide(testLayer)),

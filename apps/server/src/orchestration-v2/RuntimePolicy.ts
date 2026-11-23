@@ -17,6 +17,7 @@ import * as Schema from "effect/Schema";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import * as AgentWorkspaceService from "../workspace/AgentWorkspaceService.ts";
 import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
@@ -140,6 +141,9 @@ export const layerFromProjectStore: Layer.Layer<
   Effect.gen(function* () {
     const projects = yield* ProjectStore.ProjectStoreV2;
     const workspaceFolders = yield* WorkspaceFolders.WorkspaceFolders;
+    const agentWorkspaceService = Option.getOrUndefined(
+      yield* Effect.serviceOption(AgentWorkspaceService.AgentWorkspaceService),
+    );
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     // The same ceiling the orchestrator enforces, fixed for the server's life.
     const { managedPolicy } = yield* ServerSettings.ServerSettingsService;
@@ -153,6 +157,7 @@ export const layerFromProjectStore: Layer.Layer<
             ? undefined
             : (yield* instance.snapshot.getSnapshot).supportedRuntimeModes;
         const cwd =
+          input.thread.activeWorkspace?.path ??
           input.thread.worktreePath ??
           (yield* projects.get(input.thread.projectId).pipe(
             Effect.mapError(
@@ -178,24 +183,55 @@ export const layerFromProjectStore: Layer.Layer<
             ),
           ));
         // The turn can still run in its own cwd, as a single-folder thread does.
-        const workspace = yield* workspaceFolders
-          .forThread({
-            projectId: input.thread.projectId,
-            worktreePath: input.thread.worktreePath,
-          })
-          .pipe(
-            Effect.catch((cause) =>
-              Effect.logWarning("Could not resolve the thread's tracked folders.", cause).pipe(
-                Effect.as(undefined),
-              ),
-            ),
-          );
+        const workspace =
+          input.thread.activeWorkspace != null
+            ? undefined
+            : yield* workspaceFolders
+                .forThread({
+                  projectId: input.thread.projectId,
+                  worktreePath: input.thread.worktreePath,
+                })
+                .pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning(
+                      "Could not resolve the thread's tracked folders.",
+                      cause,
+                    ).pipe(Effect.as(undefined)),
+                  ),
+                );
+        const agentWorkspaceCatalog =
+          agentWorkspaceService === undefined
+            ? undefined
+            : yield* agentWorkspaceService
+                .list()
+                .pipe(
+                  Effect.catch((cause) =>
+                    Effect.logWarning("Could not read Agent Workspaces catalog.", cause).pipe(
+                      Effect.as(undefined),
+                    ),
+                  ),
+                );
+        const activeWorkspace = input.thread.activeWorkspace ?? null;
+        const hasAgentWorkspaces =
+          (agentWorkspaceCatalog !== undefined &&
+            (agentWorkspaceCatalog.workspaces.length > 0 ||
+              agentWorkspaceCatalog.errors.length > 0)) ||
+          activeWorkspace !== null;
         return ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
           runtimeMode: providerRuntimeMode(input.thread.runtimeMode, supportedRuntimeModes),
           interactionMode: input.thread.interactionMode,
           cwd,
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
           ...(workspace === undefined || workspace.folders.length === 0 ? {} : { workspace }),
+          ...(hasAgentWorkspaces
+            ? {
+                agentWorkspaces: {
+                  workspaces: agentWorkspaceCatalog?.workspaces ?? [],
+                  errors: agentWorkspaceCatalog?.errors ?? [],
+                  activeWorkspace,
+                },
+              }
+            : {}),
         });
       }),
     });

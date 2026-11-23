@@ -62,6 +62,26 @@ export const ProviderAdapterV2RuntimeWorkspace = Schema.Struct({
 });
 export type ProviderAdapterV2RuntimeWorkspace = typeof ProviderAdapterV2RuntimeWorkspace.Type;
 
+export const ProviderAdapterV2AgentWorkspaces = Schema.Struct({
+  workspaces: Schema.Array(
+    Schema.Struct({
+      name: Schema.String,
+      description: Schema.String,
+      path: Schema.String,
+    }),
+  ),
+  errors: Schema.Array(Schema.String),
+  activeWorkspace: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        name: Schema.String,
+        path: Schema.String,
+      }),
+    ),
+  ),
+});
+export type ProviderAdapterV2AgentWorkspaces = typeof ProviderAdapterV2AgentWorkspaces.Type;
+
 export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
@@ -74,6 +94,7 @@ export const ProviderAdapterV2RuntimePolicy = Schema.Struct({
    */
   maxRuntimeMode: Schema.optional(RuntimeMode),
   workspace: Schema.optional(ProviderAdapterV2RuntimeWorkspace),
+  agentWorkspaces: Schema.optional(ProviderAdapterV2AgentWorkspaces),
 });
 export type ProviderAdapterV2RuntimePolicy = typeof ProviderAdapterV2RuntimePolicy.Type;
 
