@@ -585,6 +585,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.toolCallVisibility !== DEFAULT_UNIFIED_SETTINGS.toolCallVisibility
       ? [gt("Tool calls in chat")]
       : []),
+    ...(settings.streamLiveThinking !== DEFAULT_UNIFIED_SETTINGS.streamLiveThinking
+      ? [gt("Stream live thinking")]
+      : []),
     ...(settings.screenReaderAnnouncements !== DEFAULT_UNIFIED_SETTINGS.screenReaderAnnouncements
       ? [gt("Screen reader announcements")]
       : []),
@@ -715,6 +718,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
       sideThreadOpenTarget: DEFAULT_UNIFIED_SETTINGS.sideThreadOpenTarget,
       toolCallVisibility: DEFAULT_UNIFIED_SETTINGS.toolCallVisibility,
+      streamLiveThinking: DEFAULT_UNIFIED_SETTINGS.streamLiveThinking,
       screenReaderAnnouncements: DEFAULT_UNIFIED_SETTINGS.screenReaderAnnouncements,
       screenReaderWindowTitle: DEFAULT_UNIFIED_SETTINGS.screenReaderWindowTitle,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
@@ -1456,6 +1460,7 @@ export function ChatSettingsPanel() {
 
       <SettingsSection id="activity" title={gt("Activity")}>
         <ToolCallVisibilityRow />
+        <StreamLiveThinkingRow />
       </SettingsSection>
 
       <SettingsSection id="screen-reader" title={gt("Screen reader")}>
@@ -1517,6 +1522,38 @@ function ToolCallVisibilityRow() {
             ))}
           </SelectPopup>
         </Select>
+      }
+    />
+  );
+}
+
+function StreamLiveThinkingRow() {
+  const setting = useSearchableSetting();
+  const gt = useGT();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  return (
+    <SettingsRow
+      {...setting("stream-live-thinking")}
+      description={gt(
+        "Progressively reveal each thinking block line by line in a fixed-height preview while the agent works, instead of showing only the latest summary line.",
+      )}
+      resetAction={
+        settings.streamLiveThinking !== DEFAULT_UNIFIED_SETTINGS.streamLiveThinking ? (
+          <SettingResetButton
+            ariaLabel={gt("Reset stream live thinking to default")}
+            onClick={() =>
+              updateSettings({ streamLiveThinking: DEFAULT_UNIFIED_SETTINGS.streamLiveThinking })
+            }
+          />
+        ) : null
+      }
+      control={
+        <Switch
+          checked={settings.streamLiveThinking}
+          onCheckedChange={(checked) => updateSettings({ streamLiveThinking: checked })}
+          aria-label={gt("Stream live thinking")}
+        />
       }
     />
   );

@@ -9,7 +9,7 @@ import {
 import { AuthOrchestrationOperateScope, type ScopedThreadRef } from "@t3tools/contracts";
 import { threadContextRecord } from "@t3tools/shared/composerContextReferences";
 import { T, useGT } from "gt-react";
-import { Trash2Icon, XIcon } from "lucide-react";
+import { MoonIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -146,6 +146,9 @@ export default function SideThreadPane(props: {
     >
       {isSideChat ? (
         <div className="flex h-9 shrink-0 items-center gap-1 border-b border-border pr-1 pl-3">
+          {thread?.lineage.sideChatKind === "dream" ? (
+            <MoonIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
+          ) : null}
           <h2 className="min-w-0 flex-1 truncate text-xs font-medium">{title}</h2>
           <Tooltip>
             <TooltipTrigger

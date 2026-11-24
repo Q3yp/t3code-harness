@@ -222,6 +222,8 @@ import * as PortScanner from "./preview/PortScanner.ts";
 import * as WorkspaceEntries from "./workspace/WorkspaceEntries.ts";
 import * as WorkspaceFolders from "./workspace/WorkspaceFolders.ts";
 import * as AgentWorkspaceService from "./workspace/AgentWorkspaceService.ts";
+import * as MasterAssistantService from "./workspace/MasterAssistantService.ts";
+import * as AgentWorkspaceProjectSync from "./workspace/AgentWorkspaceProjectSync.ts";
 import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
@@ -1587,6 +1589,12 @@ export const layerWsRpc = (
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFolders = yield* WorkspaceFolders.WorkspaceFolders;
       const agentWorkspaces = yield* AgentWorkspaceService.AgentWorkspaceService;
+      const agentWorkspaceProjectSync = Option.getOrUndefined(
+        yield* Effect.serviceOption(AgentWorkspaceProjectSync.AgentWorkspaceProjectSync),
+      );
+      const masterAssistant = Option.getOrUndefined(
+        yield* Effect.serviceOption(MasterAssistantService.MasterAssistantService),
+      );
       const taskFolders = yield* TaskFolders.TaskFolders;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
@@ -1871,6 +1879,10 @@ export const layerWsRpc = (
         const environment = yield* serverEnvironment.getDescriptor;
         const auth = yield* serverAuth.getDescriptor();
         const scratchWorkspaceRoot = yield* managedFolders.scratchRoot;
+        const masterWorkspaceRoot =
+          masterAssistant === undefined
+            ? undefined
+            : yield* masterAssistant.masterRoot.pipe(Effect.orElseSucceed(() => undefined));
         const lastEventLoopStall = yield* eventLoopMonitor.latestNoticeableStall;
         const discovery = yield* resolveOpenDiscoveryForConfig({
           editors: externalLauncher.resolveAvailableEditors(),
@@ -1944,6 +1956,7 @@ export const layerWsRpc = (
             onNone: () => ({}),
             onSome: (root) => ({ scratchWorkspaceRoot: root }),
           }),
+          ...(masterWorkspaceRoot === undefined ? {} : { masterWorkspaceRoot }),
           newProjectsRoot: managedFolders.namedProjectsRoot,
           ...(lastEventLoopStall === undefined ? {} : { lastEventLoopStall }),
           serverTime: DateTime.formatIso(yield* DateTime.now),
@@ -3041,6 +3054,19 @@ export const layerWsRpc = (
               (cause) => new OrchestrationDispatchCommandError({ message: cause.message, cause }),
             ),
           ),
+        [WS_METHODS.projectsEnsureMaster]: () =>
+          masterAssistant === undefined
+            ? Effect.fail(
+                new OrchestrationDispatchCommandError({
+                  message: "Master assistant is not available in this environment.",
+                }),
+              )
+            : masterAssistant.ensureMasterProject.pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationDispatchCommandError({ message: cause.message, cause }),
+                ),
+              ),
         [WS_METHODS.projectsCreateNew]: (input) =>
           managedFolders
             .createNamedProject(input)
@@ -3174,8 +3200,26 @@ export const layerWsRpc = (
         [WS_METHODS.workspaceTaskFolder]: (input) =>
           taskFolders.find(input.worktreePath).pipe(Effect.map((taskFolder) => ({ taskFolder }))),
         [WS_METHODS.workspaceAddTaskFolderRepository]: (input) => taskFolders.addRepository(input),
-        [WS_METHODS.agentWorkspacesList]: () => agentWorkspaces.list(),
-        [WS_METHODS.agentWorkspacesRegister]: (input) => agentWorkspaces.register(input.path),
+        [WS_METHODS.agentWorkspacesList]: () =>
+          agentWorkspaces
+            .list()
+            .pipe(
+              Effect.tap(() =>
+                agentWorkspaceProjectSync === undefined
+                  ? Effect.void
+                  : agentWorkspaceProjectSync.syncAll().pipe(Effect.forkDetach, Effect.asVoid),
+              ),
+            ),
+        [WS_METHODS.agentWorkspacesRegister]: (input) =>
+          agentWorkspaces
+            .register(input.path)
+            .pipe(
+              Effect.tap((result) =>
+                agentWorkspaceProjectSync === undefined
+                  ? Effect.void
+                  : agentWorkspaceProjectSync.syncWorkspace(result.workspace.path),
+              ),
+            ),
         [WS_METHODS.agentWorkspacesUnregister]: (input) => agentWorkspaces.unregister(input.path),
         [WS_METHODS.attachmentsCreateUploadUrl]: (input) => issueAttachmentUploadUrl(input),
         [WS_METHODS.attachmentsDelete]: (input) => deletePendingAttachment(input.attachmentId),

@@ -1,5 +1,6 @@
 import { McpAttachmentInput } from "../attachment/input.ts";
 import {
+  AgentWorkspaceName,
   clampedPositiveInt,
   NonNegativeInt,
   ModelSelection,
@@ -131,10 +132,16 @@ const ProjectCloneTool = Tool.make("t3_project_clone", {
 const ThreadLaunchTool = Tool.make("t3_thread_launch", {
   ...shared,
   description:
-    "Create a top-level thread in its workspace before starting. Task in `message`. Omit `projectId`, model and modes to inherit yours (outside a thread, pass `projectId` or `scratch`); modes cannot exceed yours. On error or lost reply, reuse `clientRequestId`. Follow it with `t3_thread_read` or `t3_thread_wait`. Mention it with its `link`.",
+    "Create a top-level thread in its workspace before starting. Task in `message`. Pass `workspace` (from `workspace_list`) to launch directly inside an Agent Workspace. Omit `projectId`, model and modes to inherit yours (outside a thread, pass `projectId`, `workspace`, or `scratch`); modes cannot exceed yours. On error or lost reply, reuse `clientRequestId`. Follow it with `t3_thread_read` or `t3_thread_wait`. Mention it with its `link`.",
   parameters: Schema.Struct({
     environmentId: OrchestratorMcpEnvironmentTarget,
     projectId: Schema.optional(ProjectId),
+    workspace: Schema.optional(
+      AgentWorkspaceName.annotate({
+        description:
+          "Agent Workspace name from `workspace_list` to bind as the new thread's working root. Omit `projectId` to match its project or use Scratch.",
+      }),
+    ),
     scratch: Schema.optional(
       Schema.Boolean.annotate({
         description:

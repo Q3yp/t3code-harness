@@ -34,6 +34,13 @@ const handlers = {
       return yield* service.register(scope, input.path);
     }),
   ),
+  create_workspace: McpToolAccess.writesEnvironment((input) =>
+    Effect.gen(function* () {
+      const scope = yield* McpInvocationContext.McpInvocationContext;
+      const service = yield* AgentWorkspaceMcpService.AgentWorkspaceMcpService;
+      return yield* service.create(scope, input);
+    }),
+  ),
   workspace_unregister: McpToolAccess.writesEnvironment((input) =>
     Effect.gen(function* () {
       const scope = yield* McpInvocationContext.McpInvocationContext;

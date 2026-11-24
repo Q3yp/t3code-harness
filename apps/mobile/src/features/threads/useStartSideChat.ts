@@ -10,6 +10,7 @@ import {
   MessageId,
   ThreadId,
   type ModelSelection,
+  type OrchestrationV2SideChatKind,
   type RuntimeMode,
   type ScopedThreadRef,
 } from "@t3tools/contracts";
@@ -54,15 +55,21 @@ export function useStartSideChat() {
   return async (
     source: ScopedThreadRef,
     message: SideChatMessage,
-    settings: { readonly runtimeMode: RuntimeMode; readonly modelSelection: ModelSelection },
+    settings: {
+      readonly runtimeMode: RuntimeMode;
+      readonly modelSelection: ModelSelection;
+      readonly sideChatKind?: OrchestrationV2SideChatKind;
+    },
   ): Promise<boolean> => {
+    const isDream = settings.sideChatKind === "dream";
     const targetThreadId = ThreadId.make(uuidv4());
     const fork = await forkSideChat({
       environmentId: source.environmentId,
       input: {
         sourceThreadId: source.threadId,
         targetThreadId,
-        title: m(msg("Side chat")),
+        title: isDream ? m(msg("Dream")) : m(msg("Side chat")),
+        ...(isDream ? { sideChatKind: "dream" as const } : {}),
         creationSource: "mobile",
       },
     });

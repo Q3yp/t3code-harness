@@ -42,6 +42,14 @@ are spaced out, so a quick step can be skipped for a newer one.
 The agent's reasoning text is never read. The setting follows the agent's real activity, whatever
 **Tool calls in chat** hides, and applies to this browser or device only.
 
+## Stream live thinking
+
+Turn on **Stream live thinking** in **Settings → Chat** (web and desktop) or
+**Settings → Appearance** (mobile) to read each reasoning block line by line inside a fixed-height
+preview while the agent works, instead of seeing only the latest summary line. As the agent moves
+to a new thought block, the preview clears in place and reveals the next block without shifting the
+timeline. The setting applies to this browser or device only.
+
 To hear the open thread and what it's doing when you switch to T3 Code, turn on **Screen reader
 window title** in the same section. The window title then starts with the thread's status
 (**Working**, **Needs approval**, or **Needs your input**) and its name, then the project, so a

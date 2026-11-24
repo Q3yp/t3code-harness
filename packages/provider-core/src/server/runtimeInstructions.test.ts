@@ -180,5 +180,20 @@ describe("buildRuntimeInstructions", () => {
       "- coding: Software development across projects. (/work/coding)",
     );
     assert.include(withAgentWorkspaces, "</agent_workspaces>");
+
+    const withMaster = buildRuntimeInstructions({
+      harness: "Codex",
+      pullRequestLinking: false,
+      runtimePolicy: {
+        ...base,
+        cwd: "/home/user/.t3/master",
+        masterAssistant: { path: "/home/user/.t3/master" },
+      },
+    });
+    assert.include(withMaster, "<master_assistant>");
+    assert.include(withMaster, "/home/user/.t3/master");
+    assert.include(withMaster, "t3_thread_launch");
+    assert.include(withMaster, "</master_assistant>");
+    assert.notInclude(single, "<master_assistant>");
   });
 });

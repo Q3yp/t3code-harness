@@ -18,6 +18,7 @@ import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.
 import * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
 import * as AgentWorkspaceService from "../workspace/AgentWorkspaceService.ts";
+import * as MasterAssistantService from "../workspace/MasterAssistantService.ts";
 import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as ProjectStore from "./ProjectStore.ts";
 
@@ -144,6 +145,9 @@ export const layerFromProjectStore: Layer.Layer<
     const agentWorkspaceService = Option.getOrUndefined(
       yield* Effect.serviceOption(AgentWorkspaceService.AgentWorkspaceService),
     );
+    const masterAssistantService = Option.getOrUndefined(
+      yield* Effect.serviceOption(MasterAssistantService.MasterAssistantService),
+    );
     const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     // The same ceiling the orchestrator enforces, fixed for the server's life.
     const { managedPolicy } = yield* ServerSettings.ServerSettingsService;
@@ -212,6 +216,10 @@ export const layerFromProjectStore: Layer.Layer<
                   ),
                 );
         const activeWorkspace = input.thread.activeWorkspace ?? null;
+        const isMasterAssistant =
+          activeWorkspace === null &&
+          masterAssistantService !== undefined &&
+          (yield* masterAssistantService.isMasterPath(cwd).pipe(Effect.orElseSucceed(() => false)));
         const hasAgentWorkspaces =
           (agentWorkspaceCatalog !== undefined &&
             (agentWorkspaceCatalog.workspaces.length > 0 ||
@@ -223,6 +231,7 @@ export const layerFromProjectStore: Layer.Layer<
           cwd,
           ...(maxRuntimeMode === undefined ? {} : { maxRuntimeMode }),
           ...(workspace === undefined || workspace.folders.length === 0 ? {} : { workspace }),
+          ...(isMasterAssistant ? { masterAssistant: { path: cwd } } : {}),
           ...(hasAgentWorkspaces
             ? {
                 agentWorkspaces: {

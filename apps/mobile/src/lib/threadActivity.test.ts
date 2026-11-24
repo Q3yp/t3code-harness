@@ -2354,3 +2354,43 @@ it("caps live thought previews while preserving reasoning detail", () => {
   expect(JSON.parse(activity.getFullDetail()!).item).toMatchObject({ text });
   expect(activity.getCopyText()).toContain(text);
 });
+
+it("attaches full thoughtStream only when streamLiveThinking is enabled", () => {
+  const at = "2026-06-20T00:00:02.000Z";
+  const text = "**Checking settings**\n\nInspecting chat activity controls.";
+  const thought: OrchestrationV2TurnItem = {
+    ...base("streamed-thought", at, 1),
+    type: "reasoning",
+    status: "running",
+    completedAt: null,
+    text,
+    streaming: true,
+  };
+  const feed = buildThreadFeed([projected(userMessage(), 0), projected(thought, 1)]);
+  const cache = createThreadFeedCache();
+  const off = deriveThreadFeedPresentation(
+    feed,
+    { runId, status: "running", startedAt: at, completedAt: null },
+    new Set(),
+    new Set(),
+    at,
+    false,
+    cache,
+    { toolCallVisibility: "showAll", streamLiveThinking: false, revealedMessageId: null },
+  ).find((row) => row.type === "work-toggle");
+  expect(off?.thought).toBe("Checking settings");
+  expect(off?.thoughtStream).toBeUndefined();
+
+  const on = deriveThreadFeedPresentation(
+    feed,
+    { runId, status: "running", startedAt: at, completedAt: null },
+    new Set(),
+    new Set(),
+    at,
+    false,
+    cache,
+    { toolCallVisibility: "showAll", streamLiveThinking: true, revealedMessageId: null },
+  ).find((row) => row.type === "work-toggle");
+  expect(on?.thought).toBe("Checking settings");
+  expect(on?.thoughtStream).toEqual({ id: thought.id, text });
+});

@@ -265,6 +265,7 @@ export interface ForkSideChatInput extends CommandMetadata {
   readonly sourceThreadId: ThreadId;
   readonly targetThreadId: ThreadId;
   readonly title?: string;
+  readonly sideChatKind?: import("@t3tools/contracts").OrchestrationV2SideChatKind;
 }
 
 export interface MergeThreadBackInput extends CommandMetadata {
@@ -1177,6 +1178,7 @@ export const forkSideChat = Effect.fn("EnvironmentCommands.forkSideChat")(functi
     targetThreadId: input.targetThreadId,
     sourcePoint: { type: "latest_stable" },
     sideChat: true,
+    ...(input.sideChatKind === undefined ? {} : { sideChatKind: input.sideChatKind }),
     ...(input.title === undefined ? {} : { title: input.title }),
   });
 });

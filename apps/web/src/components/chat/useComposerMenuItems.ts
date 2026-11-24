@@ -350,6 +350,15 @@ export function useComposerMenuItems({
                 label: "/btw",
                 description: sideChatDisabledReason ?? gt("Same as /side"),
               },
+              {
+                id: "slash:dream",
+                type: "slash-command",
+                command: "dream",
+                label: "/dream",
+                description:
+                  sideChatDisabledReason ??
+                  gt("Consolidate session learnings into workspace memory docs in a side pass"),
+              },
             ] as const)
           : []),
         ...(freshSessionAvailable

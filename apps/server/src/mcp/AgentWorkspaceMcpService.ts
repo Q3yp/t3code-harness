@@ -1,10 +1,12 @@
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import {
+  type AgentWorkspaceCreateResult,
   type AgentWorkspaceError,
   type AgentWorkspaceMcpActivateInput,
   type AgentWorkspaceMcpActivateResult,
   type AgentWorkspaceMcpClearInput,
   type AgentWorkspaceMcpClearResult,
+  type AgentWorkspaceMcpCreateInput,
   AgentWorkspaceMcpFailure,
   type AgentWorkspaceMcpListResult,
   type AgentWorkspaceRegisterResult,
@@ -24,6 +26,7 @@ import * as Option from "effect/Option";
 import * as ThreadManagementService from "../orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as AgentWorkspaceService from "../workspace/AgentWorkspaceService.ts";
+import * as AgentWorkspaceProjectSync from "../workspace/AgentWorkspaceProjectSync.ts";
 import type { McpInvocationScope, McpThreadInvocationScope } from "./McpInvocationContext.ts";
 
 export class AgentWorkspaceMcpService extends Context.Service<
@@ -44,6 +47,10 @@ export class AgentWorkspaceMcpService extends Context.Service<
       scope: McpInvocationScope,
       path: string,
     ) => Effect.Effect<AgentWorkspaceRegisterResult, AgentWorkspaceMcpFailure>;
+    readonly create: (
+      scope: McpInvocationScope,
+      input: AgentWorkspaceMcpCreateInput,
+    ) => Effect.Effect<AgentWorkspaceCreateResult, AgentWorkspaceMcpFailure>;
     readonly unregister: (
       scope: McpInvocationScope,
       path: string,
@@ -84,6 +91,9 @@ function mapWorkspaceError(error: AgentWorkspaceError): AgentWorkspaceMcpFailure
 const make = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom;
   const workspaces = yield* AgentWorkspaceService.AgentWorkspaceService;
+  const projectSync = Option.getOrUndefined(
+    yield* Effect.serviceOption(AgentWorkspaceProjectSync.AgentWorkspaceProjectSync),
+  );
   const threadManagement = yield* ThreadManagementService.ThreadManagementService;
   const projects = yield* ProjectService.ProjectService;
   const platform = yield* HostProcess.Platform;
@@ -355,7 +365,23 @@ const make = Effect.gen(function* () {
   const register: AgentWorkspaceMcpService["Service"]["register"] = Effect.fn(
     "AgentWorkspaceMcpService.register",
   )(function* (_scope, workspacePath) {
-    return yield* workspaces.register(workspacePath).pipe(Effect.mapError(mapWorkspaceError));
+    return yield* workspaces.register(workspacePath).pipe(
+      Effect.tap((result) =>
+        projectSync === undefined ? Effect.void : projectSync.syncWorkspace(result.workspace.path),
+      ),
+      Effect.mapError(mapWorkspaceError),
+    );
+  });
+
+  const create: AgentWorkspaceMcpService["Service"]["create"] = Effect.fn(
+    "AgentWorkspaceMcpService.create",
+  )(function* (_scope, input) {
+    return yield* workspaces.create(input).pipe(
+      Effect.tap((result) =>
+        projectSync === undefined ? Effect.void : projectSync.syncWorkspace(result.workspace.path),
+      ),
+      Effect.mapError(mapWorkspaceError),
+    );
   });
 
   const unregister: AgentWorkspaceMcpService["Service"]["unregister"] = Effect.fn(
@@ -369,6 +395,7 @@ const make = Effect.gen(function* () {
     activate,
     clear,
     register,
+    create,
     unregister,
   });
 });

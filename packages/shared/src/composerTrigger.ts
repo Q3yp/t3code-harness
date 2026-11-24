@@ -155,3 +155,9 @@ export function parseSideChatCommand(text: string): { prompt: string } | null {
   const match = /^\/(?:side|btw)(?:\s+([\s\S]*))?$/i.exec(text.trim());
   return match ? { prompt: match[1]?.trim() ?? "" } : null;
 }
+
+/** `/dream [focus]` as the whole message: a side-chat consolidation pass over workspace docs/memory. */
+export function parseDreamCommand(text: string): { prompt: string } | null {
+  const match = /^\/dream(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  return match ? { prompt: match[1]?.trim() ?? "" } : null;
+}

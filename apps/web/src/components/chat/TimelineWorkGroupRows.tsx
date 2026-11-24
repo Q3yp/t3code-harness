@@ -62,6 +62,7 @@ import {
   toolGroupSummaryIconName,
   workEntryIconName,
 } from "./TimelineWorkEntryRow.logic";
+import { LiveThinkingStream } from "./LiveThinkingStream";
 import { formatWorkingTimerNow } from "./TimelineWorkGroupRows.logic";
 
 export const WorkGroupSection = memo(function WorkGroupSection({
@@ -629,18 +630,21 @@ export function LiveWorkEntryTimelineRow({
   if (pendingApproval) return <TimelinePendingApprovalRow approval={pendingApproval} />;
 
   const failed = workEntryDisplayIndicatesToolFailure(row.entry);
+  const rawThoughtDetail = row.thought && !row.expanded ? (row.thought.detail ?? "").trim() : "";
+  const showStreamingThought = ctx.streamLiveThinking && rawThoughtDetail !== "";
   const thoughtLine =
     row.thought && !row.expanded
       ? liveThoughtLine((row.thought.detail ?? "").slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH))
       : "";
-  const thoughtIsStatus = thoughtLine !== "" && row.entry === row.thought;
+  const hasThoughtPreview = showStreamingThought || thoughtLine !== "";
+  const thoughtIsStatus = hasThoughtPreview && row.entry === row.thought;
 
   return (
     <button
       type="button"
       className={cn(
         "group/live-work flex w-full max-w-full cursor-pointer rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/70",
-        thoughtLine ? "flex-col items-start" : "min-h-6 items-center",
+        hasThoughtPreview ? "flex-col items-start" : "min-h-6 items-center",
       )}
       aria-label={
         failed
@@ -652,7 +656,7 @@ export function LiveWorkEntryTimelineRow({
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
-      {thoughtLine ? (
+      {hasThoughtPreview ? (
         <WorkLogRow
           icon={
             <span className="flex size-4 items-center justify-center text-icon-muted">
@@ -665,15 +669,23 @@ export function LiveWorkEntryTimelineRow({
             </span>
           }
           label={
-            <span className="line-clamp-4">
-              <ChatMarkdown
-                inline
-                text={thoughtLine}
-                cwd={ctx.markdownCwd}
-                parseRawHtml={false}
-                extensions={thoughtPreviewMarkdown(gt("Thought"))}
+            showStreamingThought && row.thought ? (
+              <LiveThinkingStream
+                thoughtId={row.thought.id}
+                text={row.thought.detail ?? ""}
+                active={row.active}
               />
-            </span>
+            ) : (
+              <span className="line-clamp-4">
+                <ChatMarkdown
+                  inline
+                  text={thoughtLine}
+                  cwd={ctx.markdownCwd}
+                  parseRawHtml={false}
+                  extensions={thoughtPreviewMarkdown(gt("Thought"))}
+                />
+              </span>
+            )
           }
           wrapLabel
         />

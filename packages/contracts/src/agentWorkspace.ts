@@ -64,6 +64,21 @@ export const AgentWorkspaceRegisterResult = Schema.Struct({
 });
 export type AgentWorkspaceRegisterResult = typeof AgentWorkspaceRegisterResult.Type;
 
+export const AgentWorkspaceCreateInput = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  name: AgentWorkspaceName,
+  description: TrimmedNonEmptyString,
+  instructions: TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)),
+});
+export type AgentWorkspaceCreateInput = typeof AgentWorkspaceCreateInput.Type;
+
+export const AgentWorkspaceCreateResult = Schema.Struct({
+  workspace: AgentWorkspaceSummary,
+  source: TrimmedNonEmptyString,
+  catalog: AgentWorkspaceCatalog,
+});
+export type AgentWorkspaceCreateResult = typeof AgentWorkspaceCreateResult.Type;
+
 export const AgentWorkspaceUnregisterInput = Schema.Struct({
   path: TrimmedNonEmptyString,
 });
@@ -129,6 +144,26 @@ export const AgentWorkspaceMcpRegisterInput = Schema.Struct({
   }),
 });
 export type AgentWorkspaceMcpRegisterInput = typeof AgentWorkspaceMcpRegisterInput.Type;
+
+export const AgentWorkspaceMcpCreateInput = Schema.Struct({
+  path: TrimmedNonEmptyString.annotate({
+    description:
+      "User-authorized absolute folder path for the new workspace (created if missing; supports ~). Must not already contain AGENTS.md.",
+  }),
+  name: AgentWorkspaceName.annotate({
+    description:
+      "Unique catalog identifier: lowercase letters or digits with hyphens between words (e.g. 'writing', 'video-production').",
+  }),
+  description: TrimmedNonEmptyString.annotate({
+    description:
+      "One nonempty line describing the body of work for catalog discovery (no line breaks).",
+  }),
+  instructions: TrimmedNonEmptyString.check(Schema.isMaxLength(120_000)).annotate({
+    description:
+      "Markdown instructions body for top-level AGENTS.md (without YAML frontmatter): shared conventions, links to specific guideline files, and subfolder layout.",
+  }),
+});
+export type AgentWorkspaceMcpCreateInput = typeof AgentWorkspaceMcpCreateInput.Type;
 
 export const AgentWorkspaceMcpUnregisterInput = Schema.Struct({
   path: TrimmedNonEmptyString.annotate({

@@ -16,6 +16,13 @@ import {
   getQuestionAnswerPreview,
   hasQuestionAnswer,
 } from "@t3tools/client-runtime/work-log/user-input";
+import {
+  applyLiveThinkingTimer,
+  createInitialLiveThinkingDisplay,
+  liveThinkingBlocks,
+  planLiveThinkingTimer,
+  reconcileLiveThinkingDisplay,
+} from "@t3tools/client-runtime/work-log/presentation";
 import * as Haptics from "expo-haptics";
 import { T, useGT, useMessages } from "gt-react-native";
 import { Image } from "expo-image";
@@ -26,6 +33,7 @@ import { AnimatedLegendList } from "@legendapp/list/reanimated";
 import { useIsFocused } from "@react-navigation/native";
 import {
   useEffect,
+  useEffectEvent,
   useId,
   useLayoutEffect,
   useMemo,
@@ -1405,6 +1413,155 @@ const ThreadWorkLogRow = function ThreadWorkLogRow(
   );
 };
 
+function MobileLiveThinkingLine(props: {
+  readonly text: string;
+  readonly heading?: boolean;
+  readonly reduceMotion: boolean;
+}) {
+  const opacity = useAnimatedValue(props.reduceMotion ? 1 : 0);
+  const translateY = useAnimatedValue(props.reduceMotion ? 0 : 3);
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives imperative native entrance animation for a newly revealed line
+  useEffect(() => {
+    if (props.reduceMotion) return;
+    const animation = NativeAnimated.parallel([
+      NativeAnimated.timing(opacity, {
+        toValue: 1,
+        duration: 240,
+        useNativeDriver: true,
+      }),
+      NativeAnimated.timing(translateY, {
+        toValue: 0,
+        duration: 240,
+        useNativeDriver: true,
+      }),
+    ]);
+    animation.start();
+    return () => animation.stop();
+  }, [opacity, translateY, props.reduceMotion]);
+
+  return (
+    <NativeAnimated.View style={{ opacity, transform: [{ translateY }] }}>
+      <Text
+        selectable={false}
+        numberOfLines={props.heading ? 1 : 2}
+        ellipsizeMode="tail"
+        className={
+          props.heading ? "text-sm font-medium text-foreground" : "text-sm text-foreground-muted"
+        }
+      >
+        {props.text}
+      </Text>
+    </NativeAnimated.View>
+  );
+}
+
+function MobileLiveThinkingStream(props: {
+  readonly thoughtId: string;
+  readonly text: string;
+  readonly active: boolean;
+}) {
+  const reduceMotion = useReduceMotionEnabled();
+  const appActive = useAppActive();
+  const blocks = useMemo(
+    () => liveThinkingBlocks(props.text, { maxVisualWidth: 56 }),
+    [props.text],
+  );
+  const latestBlock = blocks.at(-1);
+  const latestBlockKey = latestBlock ? `${props.thoughtId}:${latestBlock.key}` : "";
+  const containerOpacity = useAnimatedValue(1);
+  const shownAtRef = useRef<{ blockKey: string; time: number } | null>(null);
+
+  const targetInput = {
+    blockKey: latestBlockKey,
+    block: latestBlock,
+    blockCount: blocks.length,
+    active: props.active,
+    reducedMotion: reduceMotion,
+  };
+
+  const [display, setDisplay] = useState(() => createInitialLiveThinkingDisplay(targetInput));
+
+  const readLatestTarget = useEffectEvent(() => ({
+    blockKey: latestBlockKey,
+    block: latestBlock,
+  }));
+
+  const reconciled = reconcileLiveThinkingDisplay(display, targetInput);
+  if (reconciled !== display) {
+    setDisplay(reconciled);
+  }
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives imperative native opacity clear transition between replaced blocks
+  useEffect(() => {
+    if (reduceMotion) {
+      containerOpacity.setValue(1);
+      return;
+    }
+    if (reconciled?.phase === "clearing") {
+      const fade = NativeAnimated.timing(containerOpacity, {
+        toValue: 0,
+        duration: 150,
+        useNativeDriver: true,
+      });
+      fade.start();
+      return () => fade.stop();
+    }
+    containerOpacity.setValue(1);
+  }, [reconciled?.phase, containerOpacity, reduceMotion]);
+
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives timed line-by-line reveal and block replacement
+  useEffect(() => {
+    if (!reconciled || !latestBlock || reduceMotion || !appActive) return;
+    if (shownAtRef.current?.blockKey !== reconciled.blockKey) {
+      shownAtRef.current = { blockKey: reconciled.blockKey, time: Date.now() };
+    }
+    const plan = planLiveThinkingTimer(reconciled, {
+      latestBlockKey,
+      active: props.active,
+      elapsedSinceShownMs: Date.now() - shownAtRef.current.time,
+    });
+    if (!plan) return;
+    const timer = setTimeout(() => {
+      if (plan.kind === "commit-cleared") {
+        const target = readLatestTarget();
+        shownAtRef.current = target.block ? { blockKey: target.blockKey, time: Date.now() } : null;
+        setDisplay((current) => applyLiveThinkingTimer(current, plan.kind, target));
+        return;
+      }
+      setDisplay((current) => applyLiveThinkingTimer(current, plan.kind));
+    }, plan.delayMs);
+    return () => clearTimeout(timer);
+  }, [reconciled, latestBlock, latestBlockKey, props.active, reduceMotion, appActive]);
+
+  if (!reconciled) return null;
+  const hasHeading = reconciled.block.heading !== null;
+  const showHeading = hasHeading && reconciled.revealedCount > 0;
+  const visibleBodyLineCount = Math.max(0, reconciled.revealedCount - (hasHeading ? 1 : 0));
+  const visibleBodyLines = reconciled.block.lines.slice(0, visibleBodyLineCount);
+
+  return (
+    <View style={{ height: 92, overflow: "hidden" }} className="min-w-0 flex-1 py-0.5">
+      <NativeAnimated.View key={reconciled.blockKey} style={{ opacity: containerOpacity, gap: 2 }}>
+        {showHeading && reconciled.block.heading ? (
+          <MobileLiveThinkingLine
+            key={`${reconciled.blockKey}:heading`}
+            text={reconciled.block.heading}
+            heading
+            reduceMotion={reduceMotion}
+          />
+        ) : null}
+        {visibleBodyLines.map((line) => (
+          <MobileLiveThinkingLine
+            key={`${reconciled.blockKey}:${line.id}`}
+            text={line.text}
+            reduceMotion={reduceMotion}
+          />
+        ))}
+      </NativeAnimated.View>
+    </View>
+  );
+}
+
 export function ThreadWorkGroupToggle(props: {
   readonly environmentId: EnvironmentId;
   readonly rowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
@@ -1420,6 +1577,7 @@ export function ThreadWorkGroupToggle(props: {
   readonly hasFailure: boolean;
   readonly shimmer: boolean;
   readonly thought?: string | undefined;
+  readonly thoughtStream?: { readonly id: string; readonly text: string } | undefined;
   readonly trailing?: ReactNode;
   readonly onToggle: () => void;
 }) {
@@ -1436,7 +1594,22 @@ export function ThreadWorkGroupToggle(props: {
 
   return (
     <WorkLogBlock layout="group-header">
-      {props.thought ? (
+      {props.thoughtStream ? (
+        <Pressable
+          accessible={false}
+          onPress={props.onToggle}
+          className="flex-row items-start gap-1.5 rounded-md px-0.5 active:bg-subtle"
+        >
+          <WorkLogIconSlot>
+            <WorkLogIcon icon="brain" color={props.iconSubtleColor} />
+          </WorkLogIconSlot>
+          <MobileLiveThinkingStream
+            thoughtId={props.thoughtStream.id}
+            text={props.thoughtStream.text}
+            active={props.shimmer}
+          />
+        </Pressable>
+      ) : props.thought ? (
         <Pressable
           accessible={false}
           onPress={props.onToggle}

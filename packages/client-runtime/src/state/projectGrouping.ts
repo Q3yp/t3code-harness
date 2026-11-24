@@ -296,11 +296,25 @@ export interface ProjectGroup<TProject extends EnvironmentProject = EnvironmentP
   readonly archived: boolean;
 }
 
-/** The groups a project picker offers: archived groups left out, pinned ones first. */
+/** The groups a project picker offers: archived and Master groups left out, pinned ones first. */
 export function pickableProjectGroups<
-  TGroup extends { readonly pinned: boolean; readonly archived: boolean },
+  TGroup extends {
+    readonly pinned: boolean;
+    readonly archived: boolean;
+    readonly representative?: { readonly isMaster?: true };
+    readonly memberProjects?: ReadonlyArray<{ readonly isMaster?: true }>;
+  },
 >(groups: ReadonlyArray<TGroup>): TGroup[] {
-  const open = groups.filter((group) => !group.archived);
+  const open = groups.filter(
+    (group) =>
+      !group.archived &&
+      group.representative?.isMaster !== true &&
+      !(
+        group.memberProjects !== undefined &&
+        group.memberProjects.length > 0 &&
+        group.memberProjects.every((member) => member.isMaster === true)
+      ),
+  );
   return [...open.filter((group) => group.pinned), ...open.filter((group) => !group.pinned)];
 }
 

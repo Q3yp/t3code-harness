@@ -1,6 +1,7 @@
 import {
   type OrchestrationV2AppThread,
   OrchestrationV2ContextHandoff,
+  type OrchestrationV2SideChatKind,
   type OrchestrationV2TurnItem,
   type OrchestrationV2Run,
   type OrchestrationV2ThreadProjection,
@@ -97,6 +98,7 @@ export interface ContextHandoffServiceV2Shape {
     readonly toProviderInstanceId: ProviderInstanceId;
     readonly coveredRunOrdinals: OrchestrationV2ContextHandoff["coveredRunOrdinals"];
     readonly parentItems: ReadonlyArray<OrchestrationV2TurnItem>;
+    readonly kind?: OrchestrationV2SideChatKind;
     readonly createdAt: DateTime.Utc;
   }) => Effect.Effect<OrchestrationV2ContextHandoff, ContextHandoffServiceV2Error>;
 }
@@ -252,9 +254,12 @@ const SIDE_CHAT_CONTEXT_MAX_CHARS = 8_000;
 export function makeSideChatContext(input: {
   readonly parentThreadId: ThreadId;
   readonly digest: ReadonlyArray<string | OrchestrationV2TurnItem>;
+  readonly kind?: OrchestrationV2SideChatKind;
 }): string {
   const framing =
-    "You are in a side chat beside the main thread. The main thread may still be running in the same worktree. Answer the user's questions; do not continue or redo the main thread's task.";
+    input.kind === "dream"
+      ? "You are running a /dream memory and documentation consolidation pass beside the main thread. Read DREAM.md in the working directory if it exists and follow it. Distill durable facts, user preferences, decisions, and lessons from this session (and recent related threads if helpful) into the workspace's memory and guidance files (such as MEMORY.md, memory/, USER.md, SOUL.md, or workspace docs). Prune stale or duplicate notes. Do not continue or redo the main thread's task; finish with a concise summary of what you changed."
+      : "You are in a side chat beside the main thread. The main thread may still be running in the same worktree. Answer the user's questions; do not continue or redo the main thread's task.";
   const header = "Main thread activity since this side chat's starting point:";
   const truncated = "- Earlier items truncated.";
   const footer = `Use t3_thread_read on thread ${input.parentThreadId} to see the main thread's live state.`;
@@ -602,6 +607,7 @@ const makeContextHandoffService = Effect.fn("orchestrationV2.ContextHandoffServi
         summaryText: makeSideChatContext({
           parentThreadId: input.parentThreadId,
           digest: input.parentItems,
+          ...(input.kind === undefined ? {} : { kind: input.kind }),
         }),
         createdByProviderInstanceId: null,
         createdAt: input.createdAt,

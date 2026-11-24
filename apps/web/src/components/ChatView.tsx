@@ -1214,7 +1214,12 @@ export default function ChatView(props: ChatViewProps) {
       ? draftFallback.selection
       : activeProjectSettings.settings.defaultModelSelection;
   const handleNewThreadInActiveProject = () => {
-    startNewThreadForProject(activeProjectRef, handleNewThread);
+    const workspace = activeThread?.activeWorkspace ?? draftThread?.activeWorkspace ?? null;
+    startNewThreadForProject(
+      activeProjectRef,
+      handleNewThread,
+      workspace ? { activeWorkspace: workspace } : undefined,
+    );
   };
   const handleNewThreadInActiveProjectStable = useStableCallback(handleNewThreadInActiveProject);
   const projectGroupingSettings = selectProjectGroupingSettings(settings);
@@ -3565,7 +3570,6 @@ export default function ChatView(props: ChatViewProps) {
               activeThreadEnvironmentId={activeThread.environmentId}
               activeThreadId={activeThread.id}
               isServerThread={isServerThread}
-              {...(draftId ? { draftId } : {})}
               activeThreadTitle={activeThread.title}
               activeThreadLinkOrigin={activeThreadShell?.linkOrigin?.label ?? null}
               activeProject={activeProject ?? null}

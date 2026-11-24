@@ -13,6 +13,18 @@ const DIRECT_TOOLS: ReadonlySet<string> = new Set([
   TOOL_SEARCH,
 ]);
 
+/** Extra tools listed directly for the Master assistant thread so dispatch needs no tool_search hop. */
+const MASTER_DIRECT_TOOLS: ReadonlySet<string> = new Set([
+  "t3_thread_launch",
+  "t3_thread_list",
+  "t3_thread_read",
+  "t3_thread_send",
+  "t3_project_list",
+  "schedule_task",
+  "list_scheduled_tasks",
+  "delete_scheduled_task",
+]);
+
 const MAX_RESULTS = 10;
 // Sessions that ended are never reported here, so keep only the newest.
 const MAX_SESSIONS = 256;
@@ -30,7 +42,11 @@ export class McpToolExposure extends Context.Service<
       providerSessionId: string,
       query: string,
     ) => Effect.Effect<ReadonlyArray<ListedTool>>;
-    readonly isListed: (providerSessionId: string, tool: string) => boolean;
+    readonly isListed: (
+      providerSessionId: string,
+      tool: string,
+      options?: { readonly isMaster?: boolean },
+    ) => boolean;
   }
 >()("t3/mcp/McpToolExposure") {}
 
@@ -83,7 +99,9 @@ export const make = (
       }
       return found;
     }),
-    isListed: (providerSessionId, tool) =>
-      DIRECT_TOOLS.has(tool) || loaded.get(providerSessionId)?.has(tool) === true,
+    isListed: (providerSessionId, tool, options) =>
+      DIRECT_TOOLS.has(tool) ||
+      (options?.isMaster === true && MASTER_DIRECT_TOOLS.has(tool)) ||
+      loaded.get(providerSessionId)?.has(tool) === true,
   });
 };

@@ -4,6 +4,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   detectComposerTrigger,
+  parseDreamCommand,
   parseSideChatCommand,
   serializeComposerFileLink,
 } from "./composerTrigger.ts";
@@ -178,5 +179,19 @@ describe("parseSideChatCommand", () => {
     expect(parseSideChatCommand("/sidebar")).toBeNull();
     expect(parseSideChatCommand("/btwx")).toBeNull();
     expect(parseSideChatCommand("ask /side later")).toBeNull();
+  });
+});
+
+describe("parseDreamCommand", () => {
+  it("reads an optional focus after /dream", () => {
+    expect(parseDreamCommand("/dream")).toEqual({ prompt: "" });
+    expect(parseDreamCommand("  /DREAM  prune stale memory\nkeep style prefs ")).toEqual({
+      prompt: "prune stale memory\nkeep style prefs",
+    });
+  });
+
+  it("ignores other commands and inline mentions", () => {
+    expect(parseDreamCommand("/dreaming")).toBeNull();
+    expect(parseDreamCommand("run /dream later")).toBeNull();
   });
 });

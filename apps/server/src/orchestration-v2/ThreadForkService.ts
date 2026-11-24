@@ -8,6 +8,7 @@ import {
   OrchestrationV2ProviderThread,
   OrchestrationV2ProviderTurnTokenUsage,
   OrchestrationV2Run,
+  type OrchestrationV2SideChatKind,
   OrchestrationV2ThreadProjection,
   ThreadId,
 } from "@t3tools/contracts";
@@ -60,6 +61,7 @@ export interface ThreadForkServiceV2Shape {
     readonly targetThreadId: ThreadId;
     readonly title?: string;
     readonly sideChat?: boolean;
+    readonly sideChatKind?: OrchestrationV2SideChatKind;
     readonly createdBy: OrchestrationV2Actor;
     readonly creationSource: OrchestrationV2CreationSource;
     readonly createdAt: DateTime.Utc;
@@ -124,7 +126,8 @@ export const layer: Layer.Layer<ThreadForkServiceV2> = Layer.succeed(
           parentThreadId: input.sourceProjection.thread.id,
           relationshipToParent: "fork",
           rootThreadId: input.sourceProjection.thread.lineage.rootThreadId,
-          ...(input.sideChat ? { sideChat: true } : {}),
+          ...(input.sideChat || input.sideChatKind !== undefined ? { sideChat: true } : {}),
+          ...(input.sideChatKind === undefined ? {} : { sideChatKind: input.sideChatKind }),
         },
         forkedFrom:
           sourceRun === null

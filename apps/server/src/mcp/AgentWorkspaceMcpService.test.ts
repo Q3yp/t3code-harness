@@ -197,6 +197,24 @@ it.effect(
         assert.equal(cleared.clearedWorkspace?.name, "video-production");
         assert.equal(cleared.restoredCwd, worktreeRoot);
         assert.isNull((yield* mcp.list(scope)).activeWorkspace);
+
+        const createdPath = path.join(root, "writing-workspace");
+        const created = yield* mcp.create(scope, {
+          path: createdPath,
+          name: "writing",
+          description: "Fiction and novel writing.",
+          instructions: "# Writing\n\nFollow prose-craft.md.",
+        });
+        assert.equal(created.workspace.name, "writing");
+        assert.equal(created.source, path.join(created.workspace.path, "AGENTS.md"));
+        assert.equal(created.catalog.workspaces.length, 2);
+
+        const activatedCreated = yield* mcp.activate(scope, {
+          name: "writing",
+          continuationPrompt: "Draft chapter 1.",
+        });
+        assert.equal(activatedCreated.name, "writing");
+        assert.equal(activatedCreated.continuation.status, "scheduled");
       }).pipe(Effect.provide(layer));
     }).pipe(Effect.provide(NodeServices.layer)),
 );

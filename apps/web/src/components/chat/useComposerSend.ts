@@ -2,7 +2,11 @@ import { msg } from "gt-react";
 import { resolveComposerPromptModelPresets } from "@t3tools/client-runtime/composer-model-presets";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
-import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
+import {
+  isClearComposerCommand,
+  parseDreamCommand,
+  parseSideChatCommand,
+} from "@t3tools/shared/composerTrigger";
 import { readWorktreeBaseBranch } from "../../worktreeRepositoryChoiceStore";
 import { armFreshSession, disarmFreshSession, readFreshSessionArm } from "./freshSessionArms";
 import {
@@ -110,7 +114,7 @@ import {
   referencedThreadContexts,
 } from "./composerSend.logic";
 import { useMultipleModelSend } from "./useMultipleModelSend";
-import type { SideChatMessage } from "./useSideChat";
+import type { SideChatMessage, SideChatStartOptions } from "./useSideChat";
 import { type ComposerDispatchMode } from "@t3tools/client-runtime/state/composer-dispatch";
 import {
   getUploadedAttachments,
@@ -280,7 +284,9 @@ interface ComposerSendInput {
   readonly anchorNewTurn: TimelineFollow["anchorNewTurn"];
   readonly acknowledgeActiveThreadWoke: () => void;
   /** Resolves true once the side chat started and got the message. */
-  readonly onSideChat?: ((message: SideChatMessage | undefined) => Promise<boolean>) | undefined;
+  readonly onSideChat?:
+    | ((message: SideChatMessage | undefined, options?: SideChatStartOptions) => Promise<boolean>)
+    | undefined;
   /** Refuses `/side` with this reason and keeps the draft. */
   readonly sideChatDisabledReason: string | null;
   readonly handleNewThreadInActiveProject: () => void;
@@ -465,10 +471,22 @@ export function useComposerSend(input: ComposerSendInput) {
       ? detachedOverride.sendContext
       : composerRef.current?.getSendContext();
     const isCurrentRouteThread = () => currentRouteThreadKeyRef.current === routeThreadKey;
-    // `/side` beats an open question and a plan follow-up, which would send the text to main.
+    // `/side`, `/btw`, and `/dream` beat an open question and a plan follow-up, which would send the text to main.
     const sideChatCommand =
       sendCtx && !directAnnotation && !queuedRunEdit.isEditing
-        ? parseSideChatCommand(promptAtSend)
+        ? (() => {
+            const btw = parseSideChatCommand(promptAtSend);
+            if (btw !== null) return { kind: "btw" as const, prompt: btw.prompt };
+            const dream = parseDreamCommand(promptAtSend);
+            if (dream !== null) {
+              return {
+                kind: "dream" as const,
+                prompt:
+                  dream.prompt || "Consolidate durable memory and documentation from this session.",
+              };
+            }
+            return null;
+          })()
         : null;
     const answeringQuestion =
       Boolean(activePendingUserInput) && sendCtx?.answeringPendingUserInput !== false;
@@ -687,7 +705,9 @@ export function useComposerSend(input: ComposerSendInput) {
         }
       }
       const started = await settlePromise(async () => {
-        if (!hasSendableContent) return onSideChat(undefined);
+        const startOptions: SideChatStartOptions | undefined =
+          sideChatCommand.kind === "dream" ? { kind: "dream" } : undefined;
+        if (!hasSendableContent) return onSideChat(undefined, startOptions);
         const attachments = await prepareTurnAttachments({
           environmentId,
           attachments: snapshot.attachments,
@@ -697,27 +717,33 @@ export function useComposerSend(input: ComposerSendInput) {
         // `onSideChat` forks the thread on screen, which may have changed during the upload.
         if (currentRouteThreadKeyRef.current !== routeThreadKey) return false;
         const attachmentIds = boundAttachmentIds(attachments, snapshot.attachments);
-        return onSideChat({
-          attachments,
-          ...withMessageContext({
-            text: snapshot.messageText || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
-            context: buildMessageContext({
-              ...snapshot,
-              attachments: snapshot.attachments.map((attachment, index) => ({
-                attachment,
-                attachmentId: attachmentIds[index]!,
-              })),
+        return onSideChat(
+          {
+            attachments,
+            ...withMessageContext({
+              text: snapshot.messageText || ATTACHMENT_ONLY_BOOTSTRAP_PROMPT,
+              context: buildMessageContext({
+                ...snapshot,
+                attachments: snapshot.attachments.map((attachment, index) => ({
+                  attachment,
+                  attachmentId: attachmentIds[index]!,
+                })),
+              }),
             }),
-          }),
-          titleSeed: deriveThreadTitleSeed(
-            {
-              text: snapshot.messageText,
-              attachments: snapshot.attachments,
-              fallbackLabels: sendTitleFallbackLabels(snapshot),
-            },
-            m,
-          ),
-        });
+            titleSeed:
+              sideChatCommand.kind === "dream"
+                ? "Dream"
+                : deriveThreadTitleSeed(
+                    {
+                      text: snapshot.messageText,
+                      attachments: snapshot.attachments,
+                      fallbackLabels: sendTitleFallbackLabels(snapshot),
+                    },
+                    m,
+                  ),
+          },
+          startOptions,
+        );
       }).finally(() => {
         sendInFlightRef.current = false;
       });
@@ -842,14 +868,19 @@ export function useComposerSend(input: ComposerSendInput) {
       appAtomRegistry.get(environmentServerConfigsAtom).get(environmentId)?.settings.modelPresets ??
       [];
     if (queuedRunEdit.isEditing) {
-      // A queued message stays in its thread, so saving `/side` or `^preset` would send it to main.
-      if (!directAnnotation && parseSideChatCommand(promptAtSend)) {
+      // A queued message stays in its thread, so saving `/side`, `/dream`, or `^preset` would send it to main.
+      if (
+        !directAnnotation &&
+        (parseSideChatCommand(promptAtSend) || parseDreamCommand(promptAtSend))
+      ) {
         toastManager.add(
           stackedThreadToast({
             type: "warning",
             title: m(msg("Queued message not updated")),
             description: m(
-              msg("A queued message can't move to a side chat. Remove /side or /btw to save it."),
+              msg(
+                "A queued message can't move to a side chat. Remove /side, /btw, or /dream to save it.",
+              ),
             ),
           }),
         );
@@ -1800,14 +1831,14 @@ export function useComposerSend(input: ComposerSendInput) {
       if (backgroundThreadRef) {
         try {
           backgroundDraftOpened = Boolean(
-            await handleNewThread(
-              scopeProjectRef(activeProject.environmentId, activeProject.id),
-              resolveBackgroundDraftWorkspaceOptions({
+            await handleNewThread(scopeProjectRef(activeProject.environmentId, activeProject.id), {
+              ...resolveBackgroundDraftWorkspaceOptions({
                 envMode: sendEnvMode,
                 branch: activeThreadBranch,
                 startFromOrigin,
               }),
-            ),
+              ...(draftActiveWorkspace ? { activeWorkspace: draftActiveWorkspace } : {}),
+            }),
           );
         } catch (error) {
           clearBackgroundDraftSubmissionByRef(backgroundThreadRef);

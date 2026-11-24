@@ -1,8 +1,10 @@
 import {
+  AgentWorkspaceCreateResult,
   AgentWorkspaceMcpActivateInput,
   AgentWorkspaceMcpActivateResult,
   AgentWorkspaceMcpClearInput,
   AgentWorkspaceMcpClearResult,
+  AgentWorkspaceMcpCreateInput,
   AgentWorkspaceMcpFailure,
   AgentWorkspaceMcpListResult,
   AgentWorkspaceMcpRegisterInput,
@@ -87,6 +89,21 @@ const WorkspaceRegisterTool = Tool.make("workspace_register", {
   .annotate(Tool.Idempotent, true)
   .annotate(Tool.OpenWorld, false);
 
+const CreateWorkspaceTool = Tool.make("create_workspace", {
+  description:
+    "Create and register a user-authorized Agent Workspace folder following the Agent Workspaces standard: a directory with a top-level AGENTS.md whose YAML frontmatter defines only `name` (unique lowercase letters/digits separated by hyphens) and `description` (one nonempty line for catalog discovery), followed by shared Markdown `instructions` linking to focused guideline files while keeping individual work in subfolders (with optional nested AGENTS.md). Separate from skills. Refuses to overwrite an existing AGENTS.md.",
+  parameters: AgentWorkspaceMcpCreateInput,
+  success: AgentWorkspaceCreateResult,
+  failure: AgentWorkspaceToolFailure,
+  failureMode: "return",
+  dependencies,
+})
+  .annotate(Tool.Title, "Create and register workspace")
+  .annotate(Tool.Readonly, false)
+  .annotate(Tool.Destructive, false)
+  .annotate(Tool.Idempotent, false)
+  .annotate(Tool.OpenWorld, false);
+
 const WorkspaceUnregisterTool = Tool.make("workspace_unregister", {
   description: "Remove a workspace folder from the catalog without deleting any workspace files.",
   parameters: AgentWorkspaceMcpUnregisterInput,
@@ -106,5 +123,6 @@ export const AgentWorkspaceToolkit = Toolkit.make(
   WorkspaceActivateTool,
   WorkspaceClearTool,
   WorkspaceRegisterTool,
+  CreateWorkspaceTool,
   WorkspaceUnregisterTool,
 );

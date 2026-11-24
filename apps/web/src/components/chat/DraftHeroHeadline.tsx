@@ -14,7 +14,7 @@ import { useRef, useState } from "react";
 
 import {
   activeWorkspaceFromSummary,
-  findContainingAgentWorkspace,
+  groupEntriesByAgentWorkspace,
   workspacePathsEqual,
 } from "~/lib/agentWorkspaces";
 import { useEnvironmentAgentWorkspaces } from "~/state/agentWorkspaces";
@@ -140,8 +140,6 @@ export function DraftHeroHeadline({
         ) ?? null);
   const activeProjectKey = activeProjectGroup?.projectKey ?? "";
   const hasResolvedProject = activeProjectTitle !== null;
-  const canChooseProject = projectPickerEntries.length > 0;
-  const shouldShowProjectMenu = canChooseProject;
   const menuEntries = projectPickerEntries.filter(
     ({ targetProject }) =>
       !isScratchProject(targetProject, scratchWorkspaceRootFor(targetProject.environmentId)),
@@ -158,6 +156,8 @@ export function DraftHeroHeadline({
   const workspaceEnvironmentId =
     activeProjectRef?.environmentId ?? scratchTargetEnvironmentId ?? primaryEnvironmentId;
   const { workspaces: agentWorkspaces } = useEnvironmentAgentWorkspaces(workspaceEnvironmentId);
+  const canChooseProject = projectPickerEntries.length > 0 || agentWorkspaces.length > 0;
+  const shouldShowProjectMenu = canChooseProject;
   const workspaceByItemValue = new Map<string, AgentWorkspaceSummary>(
     agentWorkspaces.map((workspace) => [`${WORKSPACE_ITEM_PREFIX}${workspace.path}`, workspace]),
   );
@@ -165,23 +165,17 @@ export function DraftHeroHeadline({
   const isScratchDraft =
     activeProject !== null &&
     isScratchProject(activeProject, scratchWorkspaceRootFor(activeProject.environmentId));
+  const isPlainScratchDraft = isScratchDraft && draftActiveWorkspace === null;
 
-  // Group registered projects under their containing Agent Workspace when one exists.
-  const nestedEntriesByWorkspacePath = new Map<string, Array<(typeof menuEntries)[number]>>();
-  const standaloneMenuEntries: Array<(typeof menuEntries)[number]> = [];
-  for (const entry of menuEntries) {
-    const containing =
-      entry.targetProject.environmentId === workspaceEnvironmentId
-        ? findContainingAgentWorkspace(entry.targetProject.workspaceRoot, agentWorkspaces)
-        : null;
-    if (containing && !workspacePathsEqual(entry.targetProject.workspaceRoot, containing.path)) {
-      const list = nestedEntriesByWorkspacePath.get(containing.path) ?? [];
-      list.push(entry);
-      nestedEntriesByWorkspacePath.set(containing.path, list);
-    } else {
-      standaloneMenuEntries.push(entry);
-    }
-  }
+  const { nestedByWorkspacePath: nestedEntriesByWorkspacePath, standalone: standaloneMenuEntries } =
+    groupEntriesByAgentWorkspace({
+      entries: menuEntries,
+      workspaces: agentWorkspaces,
+      getPath: (entry) =>
+        entry.targetProject.environmentId === workspaceEnvironmentId
+          ? entry.targetProject.workspaceRoot
+          : null,
+    });
   const hierarchicalPickerItems: Array<PickerItem> = [];
   for (const workspace of agentWorkspaces) {
     hierarchicalPickerItems.push({
@@ -233,8 +227,13 @@ export function DraftHeroHeadline({
                   (candidate) => candidate.description ?? "",
                 ))),
         );
-  const activeWorkspaceItemValue = draftActiveWorkspace
-    ? `${WORKSPACE_ITEM_PREFIX}${draftActiveWorkspace.path}`
+  const matchedActiveWorkspace = draftActiveWorkspace
+    ? (agentWorkspaces.find((workspace) =>
+        workspacePathsEqual(workspace.path, draftActiveWorkspace.path),
+      ) ?? null)
+    : null;
+  const activeWorkspaceItemValue = matchedActiveWorkspace
+    ? `${WORKSPACE_ITEM_PREFIX}${matchedActiveWorkspace.path}`
     : null;
   const selectedPickerItem =
     (activeWorkspaceItemValue
@@ -263,7 +262,7 @@ export function DraftHeroHeadline({
     const projectRef = scopeProjectRef(project.environmentId, project.id);
     if (!composerDraftHasUserContent(getComposerDraft(draftId))) {
       setDraftThreadContext(draftId, { activeWorkspace: null });
-      void openProjectDraft(projectRef);
+      void openProjectDraft(projectRef, { activeWorkspace: null });
       return;
     }
     setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
@@ -275,6 +274,7 @@ export function DraftHeroHeadline({
     if (!draftId) {
       return;
     }
+    pendingScratchRef.current = null;
     const nextWorkspace = activeWorkspaceFromSummary(workspace);
     const exactProject = projects.find(
       (project) =>
@@ -296,7 +296,14 @@ export function DraftHeroHeadline({
     }
     const targetEnvId = workspaceEnvironmentId ?? scratchTargetEnvironmentId;
     if (targetEnvId !== null) {
+      const request = Symbol("workspace-scratch");
+      pendingScratchRef.current = request;
+      const requestedTarget = draftTargetKey();
       const scratchProject = await openScratchProject(targetEnvId);
+      if (pendingScratchRef.current !== request || draftTargetKey() !== requestedTarget) {
+        return;
+      }
+      pendingScratchRef.current = null;
       if (scratchProject) {
         const logicalKey = deriveLogicalProjectKeyFromSettings(
           scratchProject,
@@ -305,6 +312,7 @@ export function DraftHeroHeadline({
         const projectRef = scopeProjectRef(scratchProject.environmentId, scratchProject.id);
         setLogicalProjectDraftThreadId(logicalKey, projectRef, draftId, {
           activeWorkspace: nextWorkspace,
+          envMode: "local",
         });
         seedDraftModelSelection(draftId, projectRef);
         return;
@@ -313,6 +321,12 @@ export function DraftHeroHeadline({
     setDraftThreadContext(draftId, { activeWorkspace: nextWorkspace });
   };
   const startScratch = async (): Promise<boolean> => {
+    if (isScratchDraft && draftActiveWorkspace !== null) {
+      if (!draftId) return false;
+      pendingScratchRef.current = null;
+      setDraftThreadContext(draftId, { activeWorkspace: null });
+      return true;
+    }
     if (scratchTargetEnvironmentId === null || isScratchDraft) {
       return false;
     }
@@ -353,6 +367,12 @@ export function DraftHeroHeadline({
         }
         const workspace = workspaceByItemValue.get(item.value);
         if (workspace) {
+          if (
+            draftActiveWorkspace &&
+            workspacePathsEqual(draftActiveWorkspace.path, workspace.path)
+          ) {
+            return;
+          }
           void selectAgentWorkspace(workspace);
           return;
         }
@@ -477,7 +497,9 @@ export function DraftHeroHeadline({
 
   const noProjectShortcut = shortcutLabelForCommand(keybindings, "chat.newWithoutProject");
   const orStartWithoutProject =
-    scratchWorkspaceRoot !== null && !isScratchDraft && (hasResolvedProject || canChooseProject) ? (
+    scratchWorkspaceRoot !== null &&
+    !isPlainScratchDraft &&
+    (hasResolvedProject || canChooseProject) ? (
       <Tooltip>
         <TooltipTrigger
           render={
@@ -524,7 +546,7 @@ export function DraftHeroHeadline({
         </DraftHeroProjectHeading>
       ) : (
         <h1 className="w-full text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-          {isScratchDraft ? (
+          {isPlainScratchDraft ? (
             <T>What should we work on?</T>
           ) : canChooseProject ? (
             <T>
@@ -537,7 +559,7 @@ export function DraftHeroHeadline({
       )}
       {scratchWorkspaceRoot === null ? null : (
         <p className="mt-2 flex h-6 w-full items-center justify-center text-sm">
-          {isScratchDraft ? projectSelector : orStartWithoutProject}
+          {isPlainScratchDraft ? projectSelector : orStartWithoutProject}
         </p>
       )}
     </div>

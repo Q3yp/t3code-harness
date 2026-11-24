@@ -67,6 +67,7 @@ import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts
 import * as SecretRequests from "../secrets/SecretRequests.ts";
 import * as FeedbackStore from "../feedback/FeedbackStore.ts";
 import * as AgentWorkspaceService from "../workspace/AgentWorkspaceService.ts";
+import * as MasterAssistantService from "../workspace/MasterAssistantService.ts";
 import * as WorkspaceFolders from "../workspace/WorkspaceFolders.ts";
 import * as TaskFolderStore from "../workspace/TaskFolderStore.ts";
 
@@ -77,12 +78,6 @@ export const layerEventInfrastructure = Layer.mergeAll(
 
 const layerWorkspaceFoldersProvided = WorkspaceFolders.layer.pipe(
   Layer.provide(Layer.merge(ProjectStore.layer, TaskFolderStore.layer)),
-);
-
-const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
-  Layer.provide(layerWorkspaceFoldersProvided),
-  Layer.provide(ProjectStore.layer),
-  Layer.provide(AgentWorkspaceService.layer),
 );
 
 const layerEventStoreProvided = EventStore.layerFromOrchestrationEventStore.pipe(
@@ -123,6 +118,17 @@ export const layerProjectService = ProjectService.layer.pipe(
       layerLegacyV1ThreadImporterProvided,
     ),
   ),
+);
+
+const layerMasterAssistantProvided = MasterAssistantService.layer.pipe(
+  Layer.provide(layerProjectService),
+);
+
+const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
+  Layer.provide(layerWorkspaceFoldersProvided),
+  Layer.provide(ProjectStore.layer),
+  Layer.provide(AgentWorkspaceService.layer),
+  Layer.provide(MasterAssistantService.layer),
 );
 
 const layerProviderEventIngestorProvided = ProviderEventIngestor.layer.pipe(
@@ -438,6 +444,7 @@ export const layerProduction = Layer.mergeAll(
   ),
   layer,
   layerManagedProjectFoldersProvided,
+  layerMasterAssistantProvided,
   layerThreadLaunchProvided,
   layerScheduledTaskProvided,
   layerWorkflowsProvided,

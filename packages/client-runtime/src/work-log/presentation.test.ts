@@ -4,6 +4,14 @@ import { ThreadId, TurnItemId, type OrchestrationV2TurnItem } from "@t3tools/con
 import * as DateTime from "effect/DateTime";
 
 import {
+  applyLiveThinkingTimer,
+  createInitialLiveThinkingDisplay,
+  LIVE_THINKING_CLEAR_MS,
+  LIVE_THINKING_LINE_INTERVAL_MS,
+  LIVE_THINKING_MIN_DWELL_MS,
+  liveThinkingBlocks,
+  planLiveThinkingTimer,
+  reconcileLiveThinkingDisplay,
   resolveWorkEntryToolPresentation,
   toolItemForDisplay,
   type WorkLogPresentationEntry,
@@ -202,5 +210,156 @@ describe("resolveWorkEntryToolPresentation", () => {
         toolData: { server: "another-server", tool: "preview_click" },
       }),
     ).toBeNull();
+  });
+});
+
+describe("liveThinkingBlocks", () => {
+  const summarize = (blocks: ReturnType<typeof liveThinkingBlocks>) =>
+    blocks.map((block) => ({
+      key: block.key,
+      heading: block.heading,
+      lines: block.lines.map((line) => line.text),
+    }));
+
+  it("groups a bold heading with its paragraph and splits later headings into new blocks", () => {
+    const blocks = liveThinkingBlocks(
+      "**Checking settings**\n\nI need to inspect SettingsPanels.tsx. Then wire mobile.\n\n**Designing reveal**\n\nKeep the height fixed and replace blocks cleanly.",
+    );
+    expect(summarize(blocks)).toEqual([
+      {
+        key: "0",
+        heading: "Checking settings",
+        lines: ["I need to inspect SettingsPanels.tsx.", "Then wire mobile."],
+      },
+      {
+        key: "1",
+        heading: "Designing reveal",
+        lines: ["Keep the height fixed and replace blocks cleanly."],
+      },
+    ]);
+  });
+
+  it("keeps the same block key and earlier lines stable while streaming into a heading block", () => {
+    const step1 = liveThinkingBlocks("**Analyzing");
+    const step2 = liveThinkingBlocks("**Analyzing**");
+    const step3 = liveThinkingBlocks("**Analyzing**\n\nFirst sentence.");
+    const step4 = liveThinkingBlocks("**Analyzing**\n\nFirst sentence. Second sentence.");
+
+    expect(summarize(step1)).toEqual([{ key: "0", heading: "Analyzing", lines: [] }]);
+    expect(summarize(step2)).toEqual([{ key: "0", heading: "Analyzing", lines: [] }]);
+    expect(summarize(step3)).toEqual([
+      { key: "0", heading: "Analyzing", lines: ["First sentence."] },
+    ]);
+    expect(summarize(step4)).toEqual([
+      { key: "0", heading: "Analyzing", lines: ["First sentence.", "Second sentence."] },
+    ]);
+    expect(step4[0]?.lines.map((line) => line.id)).toEqual(["0:0", "0:1"]);
+  });
+
+  it("splits plain prose paragraphs and paginates long CJK or English paragraphs", () => {
+    const blocks = liveThinkingBlocks(
+      "第一句先检查设置面板。第二句看看移动端。第三句确认国际化。第四句检查测试。第五句准备验证。",
+      { maxLinesPerBlock: 3 },
+    );
+    expect(summarize(blocks)).toEqual([
+      {
+        key: "0",
+        heading: null,
+        lines: ["第一句先检查设置面板。", "第二句看看移动端。", "第三句确认国际化。"],
+      },
+      {
+        key: "1",
+        heading: null,
+        lines: ["第四句检查测试。", "第五句准备验证。"],
+      },
+    ]);
+  });
+
+  it("reveals streamed lines one by one, dwells before clearing, and swaps to the newest block", () => {
+    const initialBlocks = liveThinkingBlocks("**Checking settings**");
+    let state = createInitialLiveThinkingDisplay({
+      blockKey: "t1:0",
+      block: initialBlocks[0],
+      blockCount: initialBlocks.length,
+      active: true,
+      reducedMotion: false,
+    });
+    expect(state).toMatchObject({ blockKey: "t1:0", revealedCount: 1, phase: "showing" });
+    expect(
+      planLiveThinkingTimer(state!, {
+        latestBlockKey: "t1:0",
+        active: true,
+        elapsedSinceShownMs: 0,
+      }),
+    ).toBeNull();
+
+    // Same block receives two body lines: reconciles in place without clearing, then reveals line by line.
+    const streamedBlocks = liveThinkingBlocks(
+      "**Checking settings**\n\nFirst sentence. Second sentence.",
+    );
+    state = reconcileLiveThinkingDisplay(state, {
+      blockKey: "t1:0",
+      block: streamedBlocks[0],
+      blockCount: streamedBlocks.length,
+      active: true,
+      reducedMotion: false,
+    });
+    expect(state).toMatchObject({ blockKey: "t1:0", revealedCount: 1, phase: "showing" });
+    expect(
+      planLiveThinkingTimer(state!, {
+        latestBlockKey: "t1:0",
+        active: true,
+        elapsedSinceShownMs: 100,
+      }),
+    ).toEqual({ kind: "reveal-next", delayMs: LIVE_THINKING_LINE_INTERVAL_MS });
+
+    state = applyLiveThinkingTimer(state, "reveal-next");
+    expect(state?.revealedCount).toBe(2);
+    state = applyLiveThinkingTimer(state, "reveal-next");
+    expect(state?.revealedCount).toBe(3);
+
+    // New block arrives early: respects remaining dwell time, then clears, then commits the latest block.
+    const nextBlocks = liveThinkingBlocks(
+      "**Checking settings**\n\nFirst sentence. Second sentence.\n\n**Next phase**\n\nThird sentence.",
+    );
+    const nextBlock = nextBlocks.at(-1)!;
+    expect(
+      planLiveThinkingTimer(state!, {
+        latestBlockKey: "t1:1",
+        active: true,
+        elapsedSinceShownMs: 250,
+      }),
+    ).toEqual({ kind: "begin-clear", delayMs: LIVE_THINKING_MIN_DWELL_MS - 250 });
+
+    state = applyLiveThinkingTimer(state, "begin-clear");
+    expect(state?.phase).toBe("clearing");
+    expect(
+      planLiveThinkingTimer(state!, {
+        latestBlockKey: "t1:1",
+        active: true,
+        elapsedSinceShownMs: 650,
+      }),
+    ).toEqual({ kind: "commit-cleared", delayMs: LIVE_THINKING_CLEAR_MS });
+
+    state = applyLiveThinkingTimer(state, "commit-cleared", {
+      blockKey: "t1:1",
+      block: nextBlock,
+    });
+    expect(state).toMatchObject({
+      blockKey: "t1:1",
+      revealedCount: 1,
+      phase: "showing",
+    });
+    expect(state?.block.heading).toBe("Next phase");
+
+    // Reduced motion swaps immediately with every slot revealed.
+    const reduced = reconcileLiveThinkingDisplay(state, {
+      blockKey: "t1:1",
+      block: nextBlock,
+      blockCount: nextBlocks.length,
+      active: true,
+      reducedMotion: true,
+    });
+    expect(reduced).toMatchObject({ blockKey: "t1:1", revealedCount: 2, phase: "showing" });
   });
 });

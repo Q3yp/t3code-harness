@@ -5,6 +5,7 @@ import type {
   ModelSelection,
   ProjectId,
   ScopedProjectRef,
+  ThreadActiveWorkspace,
 } from "@t3tools/contracts";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
 
@@ -16,6 +17,7 @@ type ComposerModelSelectionState = Pick<
 interface ThreadContextLike {
   environmentId: EnvironmentId;
   projectId: ProjectId;
+  activeWorkspace?: ThreadActiveWorkspace | null | undefined;
 }
 
 interface NewThreadHandler {
@@ -24,6 +26,7 @@ interface NewThreadHandler {
     options?: {
       branch?: string | null;
       worktreePath?: string | null;
+      activeWorkspace?: ThreadActiveWorkspace | null;
       envMode?: DraftThreadEnvMode;
       startFromOrigin?: boolean;
     },
@@ -109,6 +112,13 @@ export async function startNewThreadFromContext(
     return false;
   }
 
-  await context.handleNewThread(projectRef);
+  const activeWorkspace = context.activeThread
+    ? (context.activeThread.activeWorkspace ?? null)
+    : context.activeDraftThread
+      ? (context.activeDraftThread.activeWorkspace ?? null)
+      : null;
+  await (activeWorkspace
+    ? context.handleNewThread(projectRef, { activeWorkspace })
+    : context.handleNewThread(projectRef));
   return true;
 }

@@ -650,6 +650,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }
 
   const preferredToolCallVisibility = useClientSettings((settings) => settings.toolCallVisibility);
+  const streamLiveThinking = useClientSettings((settings) => settings.streamLiveThinking);
   const screenReaderAnnouncements = useClientSettings(
     (settings) => settings.screenReaderAnnouncements,
   );
@@ -1124,6 +1125,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onReplyToResponse,
     listRef,
     timestampFormat,
+    streamLiveThinking,
     routeThreadKey,
     threadRef: citationThreadRef,
     markdownCwd,

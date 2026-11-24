@@ -533,6 +533,14 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "stream-live-thinking",
+    title: msg("Stream live thinking"),
+    to: "/settings/chat",
+    searchTerms: [
+      msg("thinking reasoning thought live stream progressive reveal expand summary activity chat"),
+    ],
+  },
+  {
     id: "screen-reader-announcements",
     title: msg("Screen reader announcements"),
     to: "/settings/chat",
@@ -1517,6 +1525,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "secret-providers",
     searchTerms: [msg("new 1password vault op cli account")],
     secretProvidersOnly: true,
+  },
+  {
+    id: "master-assistant-folder",
+    title: msg("Master folder"),
+    to: "/settings/workspaces",
+    targetId: "master-assistant-folder",
+    searchTerms: [msg("master assistant bot soul memory dream path folder")],
   },
   {
     id: "archive",

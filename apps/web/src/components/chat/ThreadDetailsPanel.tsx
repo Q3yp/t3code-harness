@@ -231,7 +231,6 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                       isServerThread={props.isServerThread}
                       draftId={props.draftId}
                       activeWorkspace={props.activeWorkspace ?? null}
-                      variant="panel"
                     />
 
                     {show.openIn ? (

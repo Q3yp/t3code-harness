@@ -86,6 +86,19 @@ export class ScratchProjectNotLoadedError extends Schema.TaggedError<ScratchProj
   }
 }
 
+export class MasterProjectNotLoadedError extends Schema.TaggedError<MasterProjectNotLoadedError>()(
+  "MasterProjectNotLoadedError",
+  { projectId: ProjectId },
+) {
+  override get message(): string {
+    return markedTextEnglish(this.i18nMessage);
+  }
+
+  get i18nMessage(): MarkedText {
+    return [msg("The Master assistant folder has not reached this device yet. Try again.")];
+  }
+}
+
 export function createProjectEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | SecureRandom.SecureRandom | R, E>,
   options: {
@@ -211,6 +224,32 @@ export function createProjectEnvironmentAtoms<R, E>(
                 Option.match({
                   onSome: Effect.succeed,
                   onNone: () => Effect.fail(new ScratchProjectNotLoadedError({ projectId })),
+                }),
+              ),
+            ),
+          ),
+        ),
+      scheduler: projectScheduler,
+      concurrency: { mode: "serial", key: ({ environmentId }) => environmentId },
+    }),
+    openMaster: createEnvironmentCommand(runtime, {
+      label: "environment-data:projects:open-master",
+      execute: (
+        input: EnvironmentRpcInput<typeof WS_METHODS.projectsEnsureMaster>,
+        registry,
+        environmentId,
+      ) =>
+        request(WS_METHODS.projectsEnsureMaster, input).pipe(
+          Effect.flatMap(({ projectId }) =>
+            AtomRegistry.toStream(registry, options.projectAtom({ environmentId, projectId })).pipe(
+              Stream.filter(Predicate.isNotNull),
+              Stream.runHead,
+              Effect.timeoutOption("10 seconds"),
+              Effect.map(Option.flatten),
+              Effect.flatMap(
+                Option.match({
+                  onSome: Effect.succeed,
+                  onNone: () => Effect.fail(new MasterProjectNotLoadedError({ projectId })),
                 }),
               ),
             ),

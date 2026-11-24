@@ -26,6 +26,7 @@ import { formatSubagentDisplayTitle } from "./subagentDisplay.ts";
 export interface EnvironmentProject extends OrchestrationProjectShell {
   readonly environmentId: EnvironmentId;
   readonly isScratch?: true;
+  readonly isMaster?: true;
 }
 
 /**

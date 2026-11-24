@@ -55,6 +55,7 @@ import { advertisedJsonSchema } from "./advertisedJsonSchema.ts";
 import * as McpInvocationContext from "./McpInvocationContext.ts";
 import * as McpToolAccess from "./McpToolAccess.ts";
 import * as McpToolExposure from "./McpToolExposure.ts";
+import * as MasterAssistantService from "../workspace/MasterAssistantService.ts";
 import * as McpWebhookTransport from "./McpWebhookTransport.ts";
 import { MCP_TOOL_EXPOSURE_HEADER } from "@t3tools/provider-core/server/mcpSession";
 import * as OrchestratorMcpService from "./OrchestratorMcpService.ts";
@@ -1497,15 +1498,34 @@ const layerToolExposure = Layer.effect(
 const layerDeferredListing = McpServer.visibility(
   Effect.gen(function* () {
     const exposure = yield* McpToolExposure.McpToolExposure;
+    const masterAssistant = Option.getOrUndefined(
+      yield* Effect.serviceOption(MasterAssistantService.MasterAssistantService),
+    );
+    const threadManagement = Option.getOrUndefined(
+      yield* Effect.serviceOption(ThreadManagementService.ThreadManagementService),
+    );
     // Untraced: it runs once per tool on every list request.
     return Effect.fnUntraced(function* ({ method, target, headers }: McpServer.MiddlewareOptions) {
       if (method !== "tools/list") return true;
       const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
-      const providerSessionId = Option.getOrUndefined(scope)?.thread?.providerSessionId;
+      const threadScope = Option.getOrUndefined(scope)?.thread;
+      const providerSessionId = threadScope?.providerSessionId;
       if (headers[MCP_TOOL_EXPOSURE_HEADER] !== "deferred" || providerSessionId === undefined) {
         return target !== McpToolExposure.TOOL_SEARCH;
       }
-      return exposure.isListed(providerSessionId, target);
+      if (exposure.isListed(providerSessionId, target)) return true;
+      const isMaster =
+        masterAssistant !== undefined && threadManagement !== undefined && threadScope !== undefined
+          ? yield* threadManagement.getThreadShell(threadScope.threadId).pipe(
+              Effect.flatMap((shell) =>
+                shell === null
+                  ? Effect.succeed(false)
+                  : masterAssistant.isMasterProject(shell.projectId),
+              ),
+              Effect.orElseSucceed(() => false),
+            )
+          : false;
+      return exposure.isListed(providerSessionId, target, { isMaster });
     });
   }),
   { global: true },

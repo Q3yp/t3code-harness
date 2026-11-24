@@ -22,6 +22,7 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
@@ -40,6 +41,7 @@ import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManag
 import * as ThreadLaunch from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "./orchestration-v2/ThreadManagementService.ts";
 import * as ProjectService from "./project/ProjectService.ts";
+import * as AgentWorkspaceProjectSync from "./workspace/AgentWorkspaceProjectSync.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
@@ -577,6 +579,24 @@ const make = Effect.fn("serverRuntimeStartup.make")(function* (options?: Startup
       ).pipe(Effect.map((targets): AutoBootstrapWelcomeTargets => targets)),
     });
     yield* Effect.logInfo("V2 orchestration recovery completed", recovery);
+    const agentWorkspaceProjectSync = Option.getOrUndefined(
+      yield* Effect.serviceOption(AgentWorkspaceProjectSync.AgentWorkspaceProjectSync),
+    );
+    if (agentWorkspaceProjectSync !== undefined) {
+      yield* runStartupPhase(
+        "agent-workspaces.sync-projects",
+        agentWorkspaceProjectSync.syncAll({ force: true }).pipe(
+          Effect.tap((created) =>
+            created.length === 0
+              ? Effect.void
+              : Effect.logInfo("Auto-registered projects under agent workspaces", {
+                  count: created.length,
+                }),
+          ),
+        ),
+      ).pipe(forkParked);
+    }
+
     // Runs after activation: the status check fetches every enabled project's
     // remote, and awaiting it here held command readiness for that long.
     yield* runStartupPhase(

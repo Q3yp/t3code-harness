@@ -12,7 +12,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { T, useGT, Var } from "gt-react";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, LayersIcon } from "lucide-react";
 import {
   memo,
   useEffect,
@@ -45,8 +45,6 @@ import { cn } from "~/lib/utils";
 import { textDirection } from "~/textDirection";
 import { useClientSettings } from "../../hooks/useSettings";
 import { GuestShareIndicator } from "./GuestShareControls";
-import { ThreadWorkspaceSwitcher } from "./ThreadWorkspaceSwitcher";
-import type { DraftId } from "../../composerDraftStore";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -54,7 +52,6 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   activeThreadLinkOrigin?: string | null | undefined;
   isServerThread: boolean;
-  draftId?: DraftId | undefined;
   activeProject: EnvironmentProject | null;
   activeWorkspace?: ThreadActiveWorkspace | null | undefined;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
@@ -81,7 +78,6 @@ export const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   activeThreadLinkOrigin,
   isServerThread,
-  draftId,
   activeProject,
   activeWorkspace = null,
   parentThreadLink,
@@ -93,6 +89,7 @@ export const ChatHeader = memo(function ChatHeader({
 }: ChatHeaderProps) {
   const gt = useGT();
   const activeProjectName = activeProject?.isScratch ? gt("No project") : activeProject?.title;
+  const breadcrumbRootLabel = activeWorkspace ? activeWorkspace.name : activeProjectName;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
   const interfaceFont = useClientSettings((settings) => settings.fontFamilySans);
   const breadcrumbContainerRef = useRef<HTMLDivElement>(null);
@@ -160,7 +157,7 @@ export const ChatHeader = memo(function ChatHeader({
     };
   }, [
     // oxlint-disable-next-line react/exhaustive-effect-dependencies -- Title, font and rename changes resize the breadcrumb text without resizing the list, so it re-measures.
-    activeProjectName,
+    breadcrumbRootLabel,
     activeThreadTitle,
     parentThreadLink,
     interfaceFont,
@@ -268,7 +265,7 @@ export const ChatHeader = memo(function ChatHeader({
         ariaLabel={gt("Thread breadcrumb")}
         className="flex-1 overflow-clip [overflow-clip-margin:2px]"
       >
-        {activeProject ? (
+        {activeWorkspace || activeProject ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
               <Tooltip>
@@ -276,23 +273,27 @@ export const ChatHeader = memo(function ChatHeader({
                   render={
                     <button
                       type="button"
-                      aria-label={gt("New thread in {project}", { project: activeProjectName })}
+                      aria-label={gt("New thread in {project}", { project: breadcrumbRootLabel })}
                       onClick={onNewThreadInProject}
                       className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
                     />
                   }
                 >
-                  <ProjectFavicon project={activeProject} className="size-3.5" />
+                  {activeWorkspace ? (
+                    <LayersIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
+                  ) : activeProject ? (
+                    <ProjectFavicon project={activeProject} className="size-3.5" />
+                  ) : null}
                   <MiddleTruncate
                     data-slot="workspace-breadcrumb-text"
-                    value={activeProjectName ?? ""}
+                    value={breadcrumbRootLabel ?? ""}
                     showTitle={false}
                     variant="cap-aligned"
                   />
                 </TooltipTrigger>
                 <TooltipPopup side="top">
                   <T>
-                    New thread in <Var>{activeProjectName}</Var>
+                    New thread in <Var>{breadcrumbRootLabel}</Var>
                   </T>
                 </TooltipPopup>
               </Tooltip>
@@ -302,14 +303,6 @@ export const ChatHeader = memo(function ChatHeader({
             </WorkspaceBreadcrumbSeparator>
           </>
         ) : null}
-        <ThreadWorkspaceSwitcher
-          environmentId={activeThreadEnvironmentId}
-          threadId={activeThreadId}
-          isServerThread={isServerThread}
-          draftId={draftId}
-          activeWorkspace={activeWorkspace}
-          variant="header"
-        />
         {parentThreadLink ? (
           <>
             <WorkspaceBreadcrumbItem>

@@ -146,6 +146,16 @@ export function isScratchProject(
   );
 }
 
+export function isMasterProject(
+  project: { readonly workspaceRoot: string; readonly isMaster?: true },
+  masterWorkspaceRoot: string | null | undefined,
+): boolean {
+  return (
+    project.isMaster === true ||
+    (masterWorkspaceRoot != null && findProjectByPath([project], masterWorkspaceRoot) !== undefined)
+  );
+}
+
 export function inferProjectTitleFromPath(value: string): string {
   const normalized = normalizeProjectPathForDispatch(value);
   const absolutePath = splitAbsolutePath(normalized);

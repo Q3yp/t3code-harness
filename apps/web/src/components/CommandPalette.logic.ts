@@ -206,6 +206,7 @@ export interface CommandPaletteItem {
   /** Shown in place of the description when the match is not in the title. */
   readonly matchHint?: SearchMatchHint;
   readonly icon: ReactNode;
+  readonly nested?: boolean;
   readonly disabled?: boolean;
   readonly titleLeadingContent?: ReactNode;
   readonly titleTrailingContent?: ReactNode;

@@ -25,6 +25,8 @@ import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import { mutateProjectWithClone } from "../../../project/ProjectMutation.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
+import * as AgentWorkspaceService from "../../../workspace/AgentWorkspaceService.ts";
+import * as MasterAssistantService from "../../../workspace/MasterAssistantService.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
 import * as GitVcsDriver from "../../../vcs/GitVcsDriver.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
@@ -260,6 +262,36 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             message:
               "scratch:true picks its own project and folder; omit projectId and workspaceStrategy.",
           });
+        const resolvedActiveWorkspace =
+          input.workspace === undefined
+            ? undefined
+            : yield* Effect.serviceOption(AgentWorkspaceService.AgentWorkspaceService).pipe(
+                Effect.flatMap(
+                  Option.match({
+                    onNone: () =>
+                      Effect.fail(
+                        new OrchestratorMcpFailure({
+                          code: "invalid_request",
+                          message: "Agent Workspaces are not enabled in this environment.",
+                        }),
+                      ),
+                    onSome: (workspaces) =>
+                      workspaces.readLive(input.workspace!).pipe(
+                        Effect.map((live) => ({
+                          name: live.workspace.name,
+                          path: live.workspace.path,
+                        })),
+                        Effect.mapError(
+                          (error) =>
+                            new OrchestratorMcpFailure({
+                              code: "invalid_request",
+                              message: error.message,
+                            }),
+                        ),
+                      ),
+                  }),
+                ),
+              );
         const projectId =
           input.scratch === true
             ? (yield* ManagedProjectFolders.ManagedProjectFolders.pipe(
@@ -272,7 +304,31 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                     }),
                 ),
               )).projectId
-            : yield* resolveProjectId(context, input.projectId);
+            : input.projectId === undefined && resolvedActiveWorkspace !== undefined
+              ? yield* Project.ProjectService.pipe(
+                  Effect.flatMap((projects) =>
+                    projects.getByWorkspaceRoot(resolvedActiveWorkspace.path),
+                  ),
+                  Effect.mapError(unavailable),
+                  Effect.flatMap(
+                    Option.match({
+                      onSome: (matched) => Effect.succeed(matched.id),
+                      onNone: () =>
+                        ManagedProjectFolders.ManagedProjectFolders.pipe(
+                          Effect.flatMap((folders) => folders.ensureScratchProject),
+                          Effect.map((ensured) => ensured.projectId),
+                          Effect.mapError(
+                            (error) =>
+                              new OrchestratorMcpFailure({
+                                code: "orchestration_error",
+                                message: error.message,
+                              }),
+                          ),
+                        ),
+                    }),
+                  ),
+                )
+              : yield* resolveProjectId(context, input.projectId);
         // A retry of an accepted launch replays it: it keeps the model it started
         // with and skips the checks only a new launch needs, which the project
         // may no longer pass, such as a base branch deleted since.
@@ -314,9 +370,10 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           const registry = yield* ProviderRegistry.ProviderRegistry;
           // The thread runs in this folder, whose own provider config can add models.
           const cwd =
-            input.workspaceStrategy?.type === "existing_worktree"
+            resolvedActiveWorkspace?.path ??
+            (input.workspaceStrategy?.type === "existing_worktree"
               ? input.workspaceStrategy.worktreePath
-              : project?.workspaceRoot;
+              : project?.workspaceRoot);
           const requireModel = (
             providers: ReadonlyArray<ServerProvider>,
           ): Effect.Effect<void, OrchestratorMcpFailure> => {
@@ -443,6 +500,9 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           runtimeMode: startedRuntimeMode,
           interactionMode,
           workspaceStrategy: strategy ?? { type: "root" },
+          ...(resolvedActiveWorkspace === undefined
+            ? {}
+            : { activeWorkspace: resolvedActiveWorkspace }),
           ...(input.message === undefined && attachments.length === 0
             ? {}
             : {
@@ -596,6 +656,18 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           code: "invalid_request",
           message:
             '"No project" is the built-in scratch project and cannot be deleted through MCP. The user can remove it in Settings.',
+        });
+      const masterAssistant = Option.getOrUndefined(
+        yield* Effect.serviceOption(MasterAssistantService.MasterAssistantService),
+      );
+      if (
+        masterAssistant !== undefined &&
+        (yield* masterAssistant.isMasterProject(input.projectId))
+      )
+        return yield* new OrchestratorMcpFailure({
+          code: "invalid_request",
+          message:
+            '"Master" is the built-in Master assistant project and cannot be deleted through MCP.',
         });
       const projects = yield* Project.ProjectService;
       const clones = yield* ProjectCloneTracker.ProjectCloneTracker;

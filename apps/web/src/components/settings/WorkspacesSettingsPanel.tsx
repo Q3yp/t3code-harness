@@ -10,6 +10,7 @@ import {
 import { T, useGT } from "gt-react";
 import {
   AlertTriangleIcon,
+  CheckIcon,
   FolderOpenIcon,
   LayersIcon,
   PlusIcon,
@@ -26,7 +27,17 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { toastManager } from "../ui/toast";
 import { useSettingsScope } from "./SettingsScopeContext";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import {
+  useScopedSettings,
+  useScopedSettingsMixed,
+  useUpdateScopedSettings,
+} from "./useScopedSettings";
+import {
+  SettingResetButton,
+  SettingsPageContainer,
+  SettingsRow,
+  SettingsSection,
+} from "./settingsLayout";
 
 function EnvironmentWorkspacesSection({
   environmentId,
@@ -231,6 +242,94 @@ function EnvironmentWorkspacesSection({
   );
 }
 
+function MasterAssistantFolderSection({ resolvedRoot }: { readonly resolvedRoot: string | null }) {
+  const gt = useGT();
+  const settings = useScopedSettings();
+  const updateSettings = useUpdateScopedSettings();
+  const mixed = useScopedSettingsMixed(["masterWorkspaceRoot"]);
+  const [editedPath, setEditedPath] = useState<string | null>(null);
+  const draftPath = editedPath ?? (mixed ? "" : settings.masterWorkspaceRoot);
+  const canBrowseLocal = readLocalApi() !== null;
+
+  const handleBrowse = async () => {
+    const api = readLocalApi();
+    if (!api) return;
+    const picked = await api.dialogs.pickFolder();
+    if (picked) {
+      setEditedPath(null);
+      updateSettings({ masterWorkspaceRoot: picked });
+    }
+  };
+
+  const handleSave = () => {
+    if (editedPath === null) return;
+    const trimmed = editedPath.trim();
+    setEditedPath(null);
+    if (mixed || trimmed !== settings.masterWorkspaceRoot) {
+      updateSettings({ masterWorkspaceRoot: trimmed });
+    }
+  };
+
+  return (
+    <SettingsSection id="master-assistant-folder" title={gt("Master Assistant")}>
+      <SettingsRow
+        title={gt("Master folder")}
+        description={gt(
+          "Dedicated folder for the fixed Master assistant (SOUL.md, USER.md, MEMORY.md, DREAM.md). Leave empty to use the default T3 home master folder.",
+        )}
+        serverScoped
+        settingKeys={["masterWorkspaceRoot"]}
+        resetAction={
+          mixed || settings.masterWorkspaceRoot !== "" ? (
+            <SettingResetButton
+              ariaLabel={gt("Reset Master folder to default")}
+              onClick={() => {
+                setEditedPath(null);
+                updateSettings({ masterWorkspaceRoot: "" });
+              }}
+            />
+          ) : null
+        }
+      >
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Input
+            value={draftPath}
+            onChange={(event) => setEditedPath(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleSave();
+              }
+            }}
+            onBlur={handleSave}
+            placeholder={mixed ? gt("Mixed") : (resolvedRoot ?? gt("Default master folder"))}
+            className="min-w-60 flex-1"
+          />
+          {canBrowseLocal ? (
+            <Button size="sm" variant="outline" onClick={() => void handleBrowse()}>
+              <FolderOpenIcon className="size-3.5" />
+              <span>
+                <T>Browse</T>
+              </span>
+            </Button>
+          ) : null}
+          <Button size="sm" onClick={handleSave}>
+            <CheckIcon className="size-3.5" />
+            <span>
+              <T>Save</T>
+            </span>
+          </Button>
+        </div>
+        {resolvedRoot ? (
+          <p className="mt-1.5 truncate font-mono text-2xs text-muted-foreground">
+            {gt("Active path: {path}", { path: resolvedRoot })}
+          </p>
+        ) : null}
+      </SettingsRow>
+    </SettingsSection>
+  );
+}
+
 export function WorkspacesSettingsPanel() {
   const gt = useGT();
   const { scope, connectedEnvironments } = useSettingsScope();
@@ -252,6 +351,8 @@ export function WorkspacesSettingsPanel() {
               environment.connection.phase === "connected",
           );
 
+  const primaryTargetMasterRoot = targetEnvironments[0]?.serverConfig?.masterWorkspaceRoot ?? null;
+
   return (
     <SettingsPageContainer>
       <div className="mb-4 text-sm text-muted-foreground">
@@ -265,13 +366,16 @@ export function WorkspacesSettingsPanel() {
           {gt("Connect an environment to manage its workspaces.")}
         </p>
       ) : (
-        targetEnvironments.map((environment) => (
-          <EnvironmentWorkspacesSection
-            key={environment.environmentId}
-            environmentId={environment.environmentId}
-            environmentLabel={environment.label}
-          />
-        ))
+        <>
+          <MasterAssistantFolderSection resolvedRoot={primaryTargetMasterRoot} />
+          {targetEnvironments.map((environment) => (
+            <EnvironmentWorkspacesSection
+              key={environment.environmentId}
+              environmentId={environment.environmentId}
+              environmentLabel={environment.label}
+            />
+          ))}
+        </>
       )}
     </SettingsPageContainer>
   );

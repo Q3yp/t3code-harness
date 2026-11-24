@@ -3,6 +3,8 @@ import { fromJsonStringPretty } from "@t3tools/shared/schemaJson";
 import {
   AGENT_WORKSPACE_NAME_PATTERN,
   type AgentWorkspaceCatalog,
+  type AgentWorkspaceCreateInput,
+  type AgentWorkspaceCreateResult,
   AgentWorkspaceError,
   type AgentWorkspaceName,
   type AgentWorkspaceSummary,
@@ -15,7 +17,7 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import { parse as parseYaml } from "yaml";
+import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 
 import * as ServerConfig from "../config.ts";
 
@@ -41,6 +43,9 @@ export class AgentWorkspaceService extends Context.Service<
       { readonly workspace: AgentWorkspaceSummary; readonly catalog: AgentWorkspaceCatalog },
       AgentWorkspaceError
     >;
+    readonly create: (
+      input: AgentWorkspaceCreateInput,
+    ) => Effect.Effect<AgentWorkspaceCreateResult, AgentWorkspaceError>;
     readonly unregister: (
       inputPath: string,
     ) => Effect.Effect<
@@ -66,6 +71,48 @@ function expandHome(inputPath: string, home: string, path: Path.Path): string {
     return path.join(home, trimmed.slice(2));
   }
   return trimmed;
+}
+
+function formatWorkspaceAgentsMarkdown(
+  input: Pick<AgentWorkspaceCreateInput, "name" | "description" | "instructions">,
+): Effect.Effect<string, AgentWorkspaceError> {
+  if (!AGENT_WORKSPACE_NAME_PATTERN.test(input.name)) {
+    return Effect.fail(
+      new AgentWorkspaceError({
+        code: "invalid_metadata",
+        message: "Workspace name must use lowercase letters or digits separated by hyphens.",
+      }),
+    );
+  }
+  const description = input.description.trim();
+  if (description.length === 0 || /[\r\n]/.test(input.description)) {
+    return Effect.fail(
+      new AgentWorkspaceError({
+        code: "invalid_metadata",
+        message: "Workspace description must be one nonempty line.",
+      }),
+    );
+  }
+  const instructions = input.instructions.trim();
+  if (instructions.length === 0) {
+    return Effect.fail(
+      new AgentWorkspaceError({
+        code: "invalid_metadata",
+        message: "Workspace instructions must not be empty.",
+      }),
+    );
+  }
+  if (FRONTMATTER_REGEX.test(instructions)) {
+    return Effect.fail(
+      new AgentWorkspaceError({
+        code: "invalid_metadata",
+        message:
+          "Workspace instructions must omit YAML frontmatter; name and description frontmatter are generated automatically.",
+      }),
+    );
+  }
+  const frontmatter = stringifyYaml({ name: input.name, description }, { lineWidth: 0 }).trimEnd();
+  return Effect.succeed(`---\n${frontmatter}\n---\n\n${instructions}\n`);
 }
 
 function parseWorkspaceAgentsMarkdown(
@@ -346,6 +393,101 @@ const make = Effect.gen(function* () {
     );
   });
 
+  const create: AgentWorkspaceService["Service"]["create"] = Effect.fn(
+    "AgentWorkspaceService.create",
+  )(function* (input) {
+    return yield* mutationLock.withPermits(1)(
+      Effect.gen(function* () {
+        const expanded = expandHome(input.path, home, path);
+        if (!path.isAbsolute(expanded)) {
+          return yield* new AgentWorkspaceError({
+            code: "invalid_path",
+            message: "Workspace path must be absolute.",
+          });
+        }
+        const resolved = path.resolve(expanded);
+        const markdown = yield* formatWorkspaceAgentsMarkdown(input);
+
+        const folderExists = yield* fileSystem
+          .exists(resolved)
+          .pipe(Effect.orElseSucceed(() => false));
+        if (folderExists) {
+          const stat = yield* fileSystem.stat(resolved).pipe(
+            Effect.mapError(
+              (cause) =>
+                new AgentWorkspaceError({
+                  code: "invalid_path",
+                  message: `Could not inspect workspace folder: ${resolved}`,
+                  cause,
+                }),
+            ),
+          );
+          if (stat.type !== "Directory") {
+            return yield* new AgentWorkspaceError({
+              code: "invalid_path",
+              message: `Workspace path is not a directory: ${resolved}`,
+            });
+          }
+          const existingAgentsPath = path.join(resolved, "AGENTS.md");
+          const agentsExists = yield* fileSystem
+            .exists(existingAgentsPath)
+            .pipe(Effect.orElseSucceed(() => false));
+          if (agentsExists) {
+            return yield* new AgentWorkspaceError({
+              code: "invalid_path",
+              message: `AGENTS.md already exists at ${existingAgentsPath}. Use workspace_register to register an existing workspace.`,
+            });
+          }
+        }
+
+        const entries = yield* readRegistryPaths();
+        for (const existingPath of entries) {
+          const existing = yield* Effect.result(readWorkspaceFolder(existingPath));
+          if (existing._tag === "Success" && existing.success.workspace.name === input.name) {
+            return yield* new AgentWorkspaceError({
+              code: "duplicate_name",
+              message: `Workspace name already registered: ${input.name}`,
+            });
+          }
+        }
+
+        if (!folderExists) {
+          yield* fileSystem.makeDirectory(resolved, { recursive: true }).pipe(
+            Effect.mapError(
+              (cause) =>
+                new AgentWorkspaceError({
+                  code: "operation_failed",
+                  message: `Could not create workspace folder ${resolved}: ${formatErrorMessage(cause)}`,
+                  cause,
+                }),
+            ),
+          );
+        }
+
+        const canonicalPath = yield* canonicalizeExistingFolder(resolved);
+        const source = path.join(canonicalPath, "AGENTS.md");
+        yield* fileSystem.writeFileString(source, markdown).pipe(
+          Effect.mapError(
+            (cause) =>
+              new AgentWorkspaceError({
+                code: "operation_failed",
+                message: `Could not write ${source}: ${formatErrorMessage(cause)}`,
+                cause,
+              }),
+          ),
+        );
+
+        const live = yield* parseWorkspaceAgentsMarkdown(source, markdown, canonicalPath);
+        if (!entries.some((entry) => pathsMatch(entry, canonicalPath))) {
+          yield* writeRegistryPaths([...entries, canonicalPath]);
+        }
+
+        const catalog = yield* list();
+        return { workspace: live.workspace, source: live.source, catalog };
+      }),
+    );
+  });
+
   const unregister: AgentWorkspaceService["Service"]["unregister"] = Effect.fn(
     "AgentWorkspaceService.unregister",
   )(function* (inputPath) {
@@ -407,6 +549,7 @@ const make = Effect.gen(function* () {
     list,
     readLive,
     register,
+    create,
     unregister,
     registeredPaths,
     verifyActiveWorkspace,

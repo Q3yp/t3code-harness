@@ -16,6 +16,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isFilesystemRoot, managedWorktreesDirectories } from "../worktreesDirectory.ts";
 import * as AgentWorkspaceService from "./AgentWorkspaceService.ts";
+import * as MasterAssistantService from "./MasterAssistantService.ts";
 
 export class UnknownWorkspaceError extends Schema.TaggedError<UnknownWorkspaceError>()(
   "UnknownWorkspaceError",
@@ -59,6 +60,9 @@ export const make = Effect.gen(function* () {
   const git = yield* GitVcsDriver.GitVcsDriver;
   const agentWorkspaces = Option.getOrUndefined(
     yield* Effect.serviceOption(AgentWorkspaceService.AgentWorkspaceService),
+  );
+  const masterAssistant = Option.getOrUndefined(
+    yield* Effect.serviceOption(MasterAssistantService.MasterAssistantService),
   );
 
   // Missing roots keep lexical paths; other resolution failures and filesystem roots grant nothing.
@@ -107,6 +111,10 @@ export const make = Effect.gen(function* () {
         for (const workspacePath of registeredWorkspacePaths) {
           if (within(yield* resolveRoot(workspacePath))) return true;
         }
+      }
+      if (masterAssistant !== undefined) {
+        const masterRoot = yield* masterAssistant.masterRoot;
+        if (within(yield* resolveRoot(masterRoot))) return true;
       }
 
       const threads = yield* sql<{ readonly worktreePath: string; readonly projectId: string }>`

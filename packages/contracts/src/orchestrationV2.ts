@@ -185,11 +185,15 @@ export const OrchestrationV2ProviderRef = Schema.Struct({
 });
 export type OrchestrationV2ProviderRef = typeof OrchestrationV2ProviderRef.Type;
 
+export const OrchestrationV2SideChatKind = Schema.Literals(["btw", "dream"]);
+export type OrchestrationV2SideChatKind = typeof OrchestrationV2SideChatKind.Type;
+
 export const OrchestrationV2AppThreadLineage = Schema.Struct({
   parentThreadId: Schema.NullOr(ThreadId),
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   rootThreadId: ThreadId,
   sideChat: Schema.optional(Schema.Boolean),
+  sideChatKind: Schema.optional(OrchestrationV2SideChatKind),
   /** An agent step of a workflow run, which the thread's `workflowRun` names. */
   workflowStep: Schema.optional(Schema.Boolean),
 });
@@ -3822,6 +3826,7 @@ export const OrchestrationV2Command = Schema.Union([
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,
     title: Schema.optional(TrimmedNonEmptyString),
     sideChat: Schema.optional(Schema.Boolean),
+    sideChatKind: Schema.optional(OrchestrationV2SideChatKind),
     createdAt: Schema.optional(Schema.DateTimeUtc),
   }),
   Schema.Struct({

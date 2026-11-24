@@ -144,6 +144,8 @@ import * as TaskFolders from "./workspace/TaskFolders.ts";
 import * as TaskFolderStore from "./workspace/TaskFolderStore.ts";
 import * as KnownWorkspaces from "./workspace/KnownWorkspaces.ts";
 import * as AgentWorkspaceService from "./workspace/AgentWorkspaceService.ts";
+import * as MasterAssistantService from "./workspace/MasterAssistantService.ts";
+import * as AgentWorkspaceProjectSync from "./workspace/AgentWorkspaceProjectSync.ts";
 import * as WorkspaceFileSystem from "./workspace/WorkspaceFileSystem.ts";
 import * as WorkspacePaths from "./workspace/WorkspacePaths.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -500,6 +502,7 @@ const layerKnownWorkspaces = KnownWorkspaces.layer.pipe(
   Layer.provide(ProjectStore.layer),
   Layer.provide(GitVcsDriver.layer),
   Layer.provide(AgentWorkspaceService.layer),
+  Layer.provide(MasterAssistantService.layer.pipe(Layer.provide(layerServerSettings))),
 );
 
 const layerReview = ReviewService.layer.pipe(
@@ -860,7 +863,8 @@ const layerRuntimeCoreDependencies = layerRuntimeCoreDependenciesBase.pipe(
   ),
 );
 
-const layerRuntimeDependencies = layerRuntimeCoreDependencies.pipe(
+const layerRuntimeDependencies = AgentWorkspaceProjectSync.layer.pipe(
+  Layer.provideMerge(layerRuntimeCoreDependencies),
   Layer.provideMerge(layerUsage),
   Layer.provideMerge(layerBackground),
   // The same layer the event sink uses; memoized, subscriptions and batch ranking share it.

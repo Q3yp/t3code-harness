@@ -417,10 +417,14 @@ export function resolveThreadSwitchTimeline<T extends readonly unknown[]>(input:
 
 export function startNewThreadForProject(
   projectRef: ScopedProjectRef | null,
-  handleNewThread: (projectRef: ScopedProjectRef) => Promise<unknown>,
+  handleNewThread: (
+    projectRef: ScopedProjectRef,
+    options?: { activeWorkspace?: import("@t3tools/contracts").ThreadActiveWorkspace | null },
+  ) => Promise<unknown>,
+  options?: { activeWorkspace?: import("@t3tools/contracts").ThreadActiveWorkspace | null },
 ): boolean {
   if (projectRef === null) return false;
-  void handleNewThread(projectRef);
+  void (options ? handleNewThread(projectRef, options) : handleNewThread(projectRef));
 
   return true;
 }

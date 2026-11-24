@@ -242,6 +242,10 @@ type ThreadFeedEntryContent =
       readonly live: boolean;
       readonly shimmer: boolean;
       readonly thought?: string;
+      readonly thoughtStream?: {
+        readonly id: string;
+        readonly text: string;
+      };
     }
   | {
       /** Images the agent opened in the tool group above, kept visible while the group is collapsed. */
@@ -380,6 +384,7 @@ const presentedActivityGroupsCache = new WeakMap<
     readonly activeRunId: RunId | null;
     readonly isWorking: boolean;
     readonly activeTail: boolean;
+    readonly streamLiveThinking: boolean;
     readonly locale: string | undefined;
     readonly rows: ReadonlyArray<ThreadFeedEntry>;
   }
@@ -1558,6 +1563,7 @@ function presentationRestart(
     previous.activeWorkStartedAt !== activeWorkStartedAt ||
     previous.runlessWorkActive !== runlessWorkActive ||
     previous.display.toolCallVisibility !== display.toolCallVisibility ||
+    Boolean(previous.display.streamLiveThinking) !== Boolean(display.streamLiveThinking) ||
     previous.display.revealedMessageId !== display.revealedMessageId ||
     !setsEqual(previous.expandedRunIds, expandedRunIds) ||
     !setsEqual(previous.expandedWorkGroupIds, expandedWorkGroupIds)
@@ -1710,11 +1716,13 @@ function liveAnswerPreview(feed: ReadonlyArray<ThreadFeedEntry>): string | null 
 
 export interface ThreadFeedDisplay {
   readonly toolCallVisibility: ToolCallVisibility;
+  readonly streamLiveThinking?: boolean;
   readonly revealedMessageId: MessageId | null;
 }
 
 const DEFAULT_THREAD_FEED_DISPLAY: ThreadFeedDisplay = {
   toolCallVisibility: "showAll",
+  streamLiveThinking: false,
   revealedMessageId: null,
 };
 
@@ -1955,6 +1963,7 @@ export function deriveThreadFeedPresentation(
         activeRunId,
         isWorking,
         isActiveTailGroup,
+        display.streamLiveThinking === true,
         resolve,
         locale,
       );
@@ -2175,6 +2184,7 @@ function appendPresentedFeedEntry(
   activeRunId: RunId | null,
   isWorking: boolean,
   activeTail: boolean,
+  streamLiveThinking: boolean,
   resolve: MessageResolver,
   locale: string | undefined,
 ): void {
@@ -2198,6 +2208,7 @@ function appendPresentedFeedEntry(
     cached.activeRunId !== activeRunId ||
     cached.isWorking !== isWorking ||
     cached.activeTail !== activeTail ||
+    cached.streamLiveThinking !== streamLiveThinking ||
     cached.locale !== locale ||
     cached.rows.some(
       (row) => row.type === "work-toggle" && expandedWorkGroupIds.has(row.groupId) !== row.expanded,
@@ -2211,9 +2222,10 @@ function appendPresentedFeedEntry(
       activeRunId,
       isWorking,
       activeTail,
+      streamLiveThinking,
       resolve,
     );
-    cached = { activeRunId, isWorking, activeTail, locale, rows };
+    cached = { activeRunId, isWorking, activeTail, streamLiveThinking, locale, rows };
     presentedActivityGroupsCache.set(entry, cached);
   }
   for (const row of cached.rows) {
@@ -2228,6 +2240,7 @@ function appendActivityGroupRows(
   activeRunId: RunId | null,
   isWorking: boolean,
   activeTail: boolean,
+  streamLiveThinking: boolean,
   resolve: MessageResolver,
 ): void {
   const groupAnchorIdByActivityId = new Map<string, string>();
@@ -2263,6 +2276,7 @@ function appendActivityGroupRows(
       activeRunId,
       isWorking,
       activeTail && isTrailingRun,
+      streamLiveThinking,
       resolve,
     );
     const paths = workEntriesViewedImagePaths(groupableRun.map((activity) => activity.workEntry));
@@ -2305,6 +2319,7 @@ function appendToolGroupRows(
   activeRunId: RunId | null,
   isWorking: boolean,
   activeTail: boolean,
+  streamLiveThinking: boolean,
   resolve: MessageResolver,
 ): void {
   const expanded = expandedWorkGroupIds.has(groupId);
@@ -2321,15 +2336,20 @@ function appendToolGroupRows(
     activities.map((activity) => activity.workEntry),
     resolve,
   );
-  const latestThought =
+  const latestThoughtActivity =
     live && !expanded
       ? activities.findLast(
           (activity) =>
             activity.workEntry.itemType === "reasoning" &&
             (activity.workEntry.detail?.trim() ?? "") !== "",
-        )?.workEntry.detail
+        )
       : undefined;
+  const latestThought = latestThoughtActivity?.workEntry.detail;
   const thought = latestThought ? compactWorkEntryText(liveThoughtLine(latestThought)) : "";
+  const thoughtStream =
+    streamLiveThinking && latestThoughtActivity && latestThought
+      ? { id: latestThoughtActivity.workEntry.id, text: latestThought }
+      : undefined;
   const summary = live
     ? (expanded || thought) && latestActivity.workEntry.itemType === "reasoning"
       ? latestActivity.lifecycleStatus === "inProgress"
@@ -2397,6 +2417,7 @@ function appendToolGroupRows(
     ...(groupToolIcon ? { toolIcon: groupToolIcon } : {}),
     ...(summaryToolIcon ? { summaryToolIcon } : {}),
     ...(thought ? { thought } : {}),
+    ...(thoughtStream ? { thoughtStream } : {}),
     hasFailure: (() => {
       const lastToolLike = activities.findLast((activity) => activity.toolLike);
       return (

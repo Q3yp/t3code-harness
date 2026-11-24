@@ -6085,9 +6085,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.sourceThreadId} was deleted.`,
       });
     }
+    const isSideChatFork = command.sideChat === true || command.sideChatKind !== undefined;
     // The fork would copy no worktree path and run in the project checkout.
     if (
-      command.sideChat === true &&
+      isSideChatFork &&
       orchestrationV2WorktreePending(sourceProjection.thread.worktreePath, sourceProjection.runs)
     ) {
       return yield* new OrchestratorDispatchError({
@@ -6106,10 +6107,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const sourceRun = runForSourcePoint(sourceProjection, command.sourcePoint);
 
     // A side chat may open during the parent's first turn; it starts from a digest instead.
-    if (
-      sourceRun === null &&
-      !(command.sideChat === true && command.sourcePoint.type === "latest_stable")
-    ) {
+    if (sourceRun === null && !(isSideChatFork && command.sourcePoint.type === "latest_stable")) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
@@ -6150,7 +6148,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         transferId,
         targetThreadId: command.targetThreadId,
         ...(command.title === undefined ? {} : { title: command.title }),
-        ...(command.sideChat ? { sideChat: true } : {}),
+        ...(isSideChatFork ? { sideChat: true } : {}),
+        ...(command.sideChatKind === undefined ? {} : { sideChatKind: command.sideChatKind }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
         createdAt: now,
@@ -9189,6 +9188,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
               toProviderInstanceId: modelSelection.instanceId,
               coveredRunOrdinals: visibleDeltaRunOrdinals(sourceProjection, sideChatParentItems),
               parentItems: sideChatParentItems,
+              ...(projection.thread.lineage.sideChatKind === undefined
+                ? {}
+                : { kind: projection.thread.lineage.sideChatKind }),
               createdAt: now,
             })
             .pipe(mapDispatchError(command));

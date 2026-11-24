@@ -211,6 +211,15 @@ it.effect("caps the side chat context block without summarizing discarded parent
     assert.isTrue(framingOnly.startsWith("You are in a side chat beside the main thread."));
     assert.notInclude(framingOnly, "Main thread activity");
 
+    const dreamFraming = ContextHandoffService.makeSideChatContext({
+      parentThreadId,
+      digest: [],
+      kind: "dream",
+    });
+    assert.include(dreamFraming, "/dream memory and documentation consolidation");
+    assert.include(dreamFraming, "DREAM.md");
+    assert.include(dreamFraming, "MEMORY.md");
+
     const multiFilePatch = ContextHandoffService.makeSideChatContext({
       parentThreadId,
       digest: [

@@ -1,7 +1,12 @@
 import { msg } from "gt-react";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { m } from "~/i18n/messages";
-import type { ModelSelection, RuntimeMode, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  ModelSelection,
+  OrchestrationV2SideChatKind,
+  RuntimeMode,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { StartThreadTurnInput } from "@t3tools/client-runtime/operations";
 import {
@@ -19,6 +24,10 @@ import { readThreadShell, waitForThreadShell } from "../../state/entities";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+
+export interface SideChatStartOptions {
+  readonly kind?: OrchestrationV2SideChatKind;
+}
 
 export type SideChatMessage = Pick<
   StartThreadTurnInput["message"],
@@ -56,13 +65,24 @@ export function useSideChat(input: {
     const error = squashAtomCommandFailure(failure);
     input.onError(thrownErrorMessage(error, m) ?? fallback);
   };
-  const start = async (threadRef: ScopedThreadRef, message: SideChatMessage | undefined) => {
+  const start = async (
+    threadRef: ScopedThreadRef,
+    message: SideChatMessage | undefined,
+    options?: SideChatStartOptions,
+  ) => {
+    const kind = options?.kind ?? "btw";
+    const isDream = kind === "dream";
     const { runtimeMode, modelSelection } = input.readSettings();
     const targetThreadId = newThreadId();
     const fork = await forkSideChat({
       environmentId: threadRef.environmentId,
-      // oxlint-disable-next-line t3code/no-untranslated-copy -- stored on the server as the thread title, shared by every viewer
-      input: { sourceThreadId: threadRef.threadId, targetThreadId, title: "Side chat" },
+      input: {
+        sourceThreadId: threadRef.threadId,
+        targetThreadId,
+        // oxlint-disable-next-line t3code/no-untranslated-copy -- stored on the server as the thread title, shared by every viewer
+        title: isDream ? "Dream" : "Side chat",
+        ...(isDream ? { sideChatKind: "dream" as const } : {}),
+      },
     });
     if (fork._tag === "Failure") {
       reportFailure(fork, m(msg("Could not start a side chat.")));
@@ -123,11 +143,11 @@ export function useSideChat(input: {
     useRightPanelStore.getState().openThread(threadRef, targetThreadId);
     return true;
   };
-  const open = async (message?: SideChatMessage) => {
+  const open = async (message?: SideChatMessage, options?: SideChatStartOptions) => {
     const { threadRef } = input;
     if (!threadRef || pendingRef.current) return false;
     pendingRef.current = true;
-    return start(threadRef, message).finally(() => {
+    return start(threadRef, message, options).finally(() => {
       pendingRef.current = false;
     });
   };

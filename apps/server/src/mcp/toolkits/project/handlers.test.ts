@@ -1,6 +1,7 @@
 import * as ProviderRegistry from "../../../provider/ProviderRegistry.ts";
 import { expect, it } from "@effect/vitest";
 import {
+  AgentWorkspaceName,
   EnvironmentId,
   GitCommandError,
   ProjectId,
@@ -38,6 +39,7 @@ import * as ServerSettings from "../../../serverSettings.ts";
 import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
+import * as AgentWorkspaceService from "../../../workspace/AgentWorkspaceService.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as SourceControlProviderRegistry from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
@@ -1286,4 +1288,75 @@ it.effect("a project update or create that is refused tells the agent why", () =
       .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
     expect(dropped.at(-1)?.result).toMatchObject({ code: "invalid_request" });
   }),
+);
+
+it.effect(
+  "t3_thread_launch binds an Agent Workspace and falls back to scratch when unmatched",
+  () =>
+    Effect.gen(function* () {
+      const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+      const scratchProjectId = ProjectId.make("project:scratch");
+      const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched });
+      const dependencies = Layer.merge(
+        harness.dependencies,
+        Layer.mergeAll(
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            ensureScratchProject: Effect.succeed({ projectId: scratchProjectId }),
+          }),
+          Layer.mock(Project.ProjectService)({
+            getByWorkspaceRoot: () => Effect.succeedNone,
+            workspaceScanDirectory: Effect.succeed,
+            getById: (id) =>
+              Effect.succeed(
+                id === scratchProjectId
+                  ? Option.some({
+                      id: scratchProjectId,
+                      title: "No project",
+                      workspaceRoot: "/scratch",
+                      defaultModelSelection: harness.projectDefaults.model,
+                      scripts: [],
+                      createdAt: "1970-01-01T00:00:00.000Z",
+                      updatedAt: "1970-01-01T00:00:00.000Z",
+                    } as unknown as ProjectRecord)
+                  : Option.none(),
+              ),
+          }),
+          Layer.mock(AgentWorkspaceService.AgentWorkspaceService)({
+            readLive: (name) =>
+              Effect.succeed({
+                workspace: {
+                  name: AgentWorkspaceName.make(name),
+                  description: "Fiction writing workspace.",
+                  path: "/workspaces/writing",
+                },
+                source: "/workspaces/writing/AGENTS.md",
+                instructions: "# Writing",
+              }),
+          }),
+        ),
+      );
+      const toolkit = yield* ProjectToolkit.pipe(
+        Effect.provide(
+          McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(
+            Layer.provide(dependencies),
+          ),
+        ),
+      );
+
+      yield* toolkit
+        .handle("t3_thread_launch", {
+          title: "Chapter 3",
+          workspace: AgentWorkspaceName.make("writing"),
+          message: "Draft chapter 3.",
+        })
+        .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+      expect(launched).toHaveLength(1);
+      expect(launched[0]?.projectId).toBe(scratchProjectId);
+      expect(launched[0]?.activeWorkspace).toEqual({
+        name: "writing",
+        path: "/workspaces/writing",
+      });
+    }),
 );

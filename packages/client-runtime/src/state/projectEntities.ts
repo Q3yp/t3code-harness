@@ -10,7 +10,7 @@ import { Atom } from "effect/reactivity";
 
 import type { EnvironmentProject } from "./models.ts";
 import { scopeProject } from "./models.ts";
-import { isScratchProject } from "./projects.ts";
+import { isMasterProject, isScratchProject } from "./projects.ts";
 import { type EnvironmentCatalogState, enabledEnvironmentIds } from "./connections.ts";
 import { arrayElementsEqual, parseProjectKey, projectKey, projectRefsEqual } from "./entities.ts";
 
@@ -24,7 +24,7 @@ export function createEnvironmentProjectAtoms(input: {
   ) => Atom.Atom<OrchestrationV2ShellSnapshot | null>;
   readonly serverConfigValueAtom?: (
     environmentId: EnvironmentId,
-  ) => Atom.Atom<Pick<ServerConfig, "scratchWorkspaceRoot"> | null>;
+  ) => Atom.Atom<Pick<ServerConfig, "scratchWorkspaceRoot" | "masterWorkspaceRoot"> | null>;
 }) {
   const environmentProjectsAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make(
@@ -62,28 +62,34 @@ export function createEnvironmentProjectAtoms(input: {
     const ref = parseProjectKey(key);
     let previousSource: OrchestrationProjectShell | null = null;
     let previousIsScratch = false;
+    let previousIsMaster = false;
     let previousValue: EnvironmentProject | null = null;
     return Atom.make((get) => {
       const source = get(environmentProjectIndexAtom(ref.environmentId)).get(ref.projectId) ?? null;
+      const serverConfig = input.serverConfigValueAtom
+        ? get(input.serverConfigValueAtom(ref.environmentId))
+        : null;
       const scratch =
-        source !== null &&
-        isScratchProject(
-          source,
-          input.serverConfigValueAtom
-            ? get(input.serverConfigValueAtom(ref.environmentId))?.scratchWorkspaceRoot
-            : null,
-        );
-      if (source === previousSource && scratch === previousIsScratch) {
+        source !== null && isScratchProject(source, serverConfig?.scratchWorkspaceRoot);
+      const master =
+        source !== null && !scratch && isMasterProject(source, serverConfig?.masterWorkspaceRoot);
+      if (
+        source === previousSource &&
+        scratch === previousIsScratch &&
+        master === previousIsMaster
+      ) {
         return previousValue;
       }
       previousSource = source;
       previousIsScratch = scratch;
+      previousIsMaster = master;
       previousValue =
         source === null
           ? null
           : {
               ...scopeProject(ref.environmentId, source),
               ...(scratch ? { isScratch: true as const } : {}),
+              ...(master ? { isMaster: true as const } : {}),
             };
       return previousValue;
     }).pipe(Atom.withLabel(`environment-project:${key}`));

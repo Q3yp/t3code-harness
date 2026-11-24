@@ -451,6 +451,7 @@ const T3_MCP_TOOLS: Readonly<Record<string, T3McpToolDefinition>> = {
     ["Register", "Registering", "Registered", "a workspace"],
     "project-create",
   ),
+  create_workspace: tool(["Create", "Creating", "Created", "a workspace"], "project-create"),
   workspace_unregister: tool(
     ["Unregister", "Unregistering", "Unregistered", "a workspace"],
     "project-delete",

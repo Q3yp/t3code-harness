@@ -10,7 +10,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { T, useGT } from "gt-react";
-import { CheckIcon, ChevronDownIcon, LayersIcon, XIcon } from "lucide-react";
+import { CheckIcon, LayersIcon, XIcon } from "lucide-react";
 import { memo, useState } from "react";
 
 import { useComposerDraftStore, type DraftId } from "~/composerDraftStore";
@@ -20,7 +20,6 @@ import { useEnvironmentAgentWorkspaces } from "~/state/agentWorkspaces";
 import { useEnvironmentScope } from "~/state/session";
 import { threadEnvironment } from "~/state/threads";
 import { useOrchestrationCommand } from "~/state/use-orchestration-command";
-import { Button } from "../ui/button";
 import {
   Menu,
   MenuGroup,
@@ -32,6 +31,7 @@ import {
 } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
+import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import {
   THREAD_DETAILS_PANEL_ICON_CLASS,
   THREAD_DETAILS_PANEL_LABEL_CLASS,
@@ -43,7 +43,6 @@ interface ThreadWorkspaceSwitcherProps {
   readonly isServerThread: boolean;
   readonly draftId?: DraftId | undefined;
   readonly activeWorkspace: ThreadActiveWorkspace | null;
-  readonly variant: "header" | "panel";
 }
 
 export const ThreadWorkspaceSwitcher = memo(function ThreadWorkspaceSwitcher({
@@ -52,7 +51,6 @@ export const ThreadWorkspaceSwitcher = memo(function ThreadWorkspaceSwitcher({
   isServerThread,
   draftId,
   activeWorkspace,
-  variant,
 }: ThreadWorkspaceSwitcherProps) {
   const gt = useGT();
   const canOperate = useEnvironmentScope(environmentId, AuthOrchestrationOperateScope);
@@ -97,43 +95,21 @@ export const ThreadWorkspaceSwitcher = memo(function ThreadWorkspaceSwitcher({
     }
   };
 
-  const trigger =
-    variant === "header" ? (
-      <MenuTrigger
-        disabled={disabled}
-        render={
-          <Button
-            size="xs"
-            variant={activeWorkspace ? "secondary" : "ghost"}
-            className="max-w-44 shrink-0"
-          />
-        }
-      >
-        <LayersIcon className="size-3 shrink-0" aria-hidden />
-        <span className="min-w-0 truncate">
-          {activeWorkspace ? activeWorkspace.name : gt("Workspace")}
-        </span>
-        <ChevronDownIcon className="size-3 shrink-0 opacity-60" aria-hidden />
-      </MenuTrigger>
-    ) : (
-      <MenuTrigger
-        disabled={disabled}
-        render={<Button size="xs" variant="ghost" className="w-full justify-start" />}
-      >
-        <LayersIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
-        <span className={cn(THREAD_DETAILS_PANEL_LABEL_CLASS, "min-w-0 flex-1 truncate text-left")}>
-          {activeWorkspace ? activeWorkspace.name : gt("No active workspace")}
-        </span>
-        <ChevronDownIcon className="size-3 shrink-0 text-muted-foreground/70" aria-hidden />
-      </MenuTrigger>
-    );
+  const trigger = (
+    <MenuTrigger disabled={disabled} render={<ThreadDetailsControl part="select" />}>
+      <LayersIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} aria-hidden />
+      <span className={cn("min-w-0 flex-1 truncate", THREAD_DETAILS_PANEL_LABEL_CLASS)}>
+        {activeWorkspace ? activeWorkspace.name : gt("No active workspace")}
+      </span>
+    </MenuTrigger>
+  );
 
   return (
     <Menu>
       {activeWorkspace ? (
         <Tooltip>
           <TooltipTrigger render={trigger} />
-          <TooltipPopup side={variant === "header" ? "bottom" : "left"}>
+          <TooltipPopup side="left">
             <div className="space-y-0.5">
               <div className="font-medium">{activeWorkspace.name}</div>
               <div className="font-mono text-2xs opacity-80">{activeWorkspace.path}</div>
@@ -143,7 +119,7 @@ export const ThreadWorkspaceSwitcher = memo(function ThreadWorkspaceSwitcher({
       ) : (
         trigger
       )}
-      <MenuPopup align={variant === "header" ? "start" : "end"} className="w-64">
+      <MenuPopup align="end" className="w-64">
         <MenuGroup>
           <MenuGroupLabel>
             <T>Agent Workspaces</T>

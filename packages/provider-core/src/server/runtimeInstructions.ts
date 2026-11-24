@@ -26,7 +26,10 @@ export function buildRuntimeInstructions(runtime: {
   readonly pullRequestLinking?: boolean;
   /** Adds the folder list of a multi-folder thread and the Agent Workspaces catalog. */
   readonly runtimePolicy?:
-    | Pick<ProviderAdapterV2RuntimePolicy, "cwd" | "workspace" | "agentWorkspaces">
+    | Pick<
+        ProviderAdapterV2RuntimePolicy,
+        "cwd" | "workspace" | "agentWorkspaces" | "masterAssistant"
+      >
     | undefined;
 }): string {
   const harness = toSingleLine(runtime.harness);
@@ -46,12 +49,17 @@ export function buildRuntimeInstructions(runtime: {
     runtime.runtimePolicy === undefined
       ? ""
       : buildAgentWorkspacesInstructions(runtime.runtimePolicy);
+  const masterAssistant =
+    runtime.runtimePolicy === undefined
+      ? ""
+      : buildMasterAssistantInstructions(runtime.runtimePolicy);
   const linked =
     runtime.pullRequestLinking === false
       ? runtimeInfo
       : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
   return [
     linked + feedback,
+    ...(masterAssistant === "" ? [] : [masterAssistant]),
     ...(workspace === "" ? [] : [workspace]),
     ...(agentWorkspaces === "" ? [] : [agentWorkspaces]),
   ].join("\n\n");
@@ -146,7 +154,7 @@ export function buildAgentWorkspacesInstructions(
   }
   const head = [
     "<agent_workspaces>",
-    "Workspaces hold live AGENTS.md instructions for a body of work and coexist with skills. Select a workspace by description when it matches the user's task, then call `workspace_activate` (which updates this thread's working root, reads its live AGENTS.md, and automatically continues work in the new root). Use `workspace_list` to refresh, `workspace_clear` to restore the thread's original root, and `workspace_register` / `workspace_unregister` only when the user authorizes managing registrations. Read linked guidelines and nested AGENTS.md files as needed; save work-specific learning only when authorized.",
+    "Workspaces hold live AGENTS.md instructions for a body of work and coexist with skills. Select a workspace by description when it matches the user's task, then call `workspace_activate` (which updates this thread's working root, reads its live AGENTS.md, and automatically continues work in the new root). Use `workspace_list` to refresh, `workspace_clear` to restore the thread's original root, and `create_workspace` / `workspace_register` / `workspace_unregister` only when the user authorizes managing workspaces. Read linked guidelines and nested AGENTS.md files as needed; save work-specific learning only when authorized.",
     ...(catalog.activeWorkspace
       ? [
           `Active workspace: ${folderLabel(catalog.activeWorkspace.name)} (${folderPath(catalog.activeWorkspace.path)})`,
@@ -174,4 +182,20 @@ export function buildAgentWorkspacesInstructions(
   return [...head, ...shown, ...(hidden > 0 ? [`- Not listed: ${hidden} more`] : []), ...tail].join(
     "\n",
   );
+}
+
+/** Concise operating context when running inside the dedicated Master assistant folder. */
+function buildMasterAssistantInstructions(
+  runtimePolicy: Pick<ProviderAdapterV2RuntimePolicy, "masterAssistant">,
+): string {
+  const master = runtimePolicy.masterAssistant;
+  if (master === undefined) return "";
+  return [
+    "<master_assistant>",
+    `You are the user's persistent Master assistant rooted at ${folderPath(master.path)}.`,
+    "Read SOUL.md, USER.md, and MEMORY.md in this folder as needed to preserve personality, user preferences, and durable memory.",
+    "Answer lightweight questions directly. For focused project or domain work, inspect existing projects and threads (`t3_project_list`, `t3_thread_list` with `allProjects: true`) first: continue an active thread with `t3_thread_send` or launch a visible top-level thread with `t3_thread_launch` (passing `workspace` and/or `projectId`), and reply with the clickable thread `link`.",
+    "Keep this thread rooted in the Master folder instead of switching its own active workspace with `workspace_activate`.",
+    "</master_assistant>",
+  ].join("\n");
 }

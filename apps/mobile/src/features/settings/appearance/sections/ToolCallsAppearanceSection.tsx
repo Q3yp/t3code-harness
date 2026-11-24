@@ -9,6 +9,7 @@ import { ListChoiceRow } from "../../../../components/ui/ListChoiceRow";
 import { mobilePreferencesAtom, saveMobilePreferences } from "../../../../state/preferences";
 import { useAtomCommand } from "../../../../state/use-atom-command";
 import { SettingsSection } from "../../components/SettingsSection";
+import { SettingsSwitchRow } from "../../components/SettingsSwitchRow";
 
 const TOOL_CALL_VISIBILITY_OPTIONS: ReadonlyArray<{
   readonly value: ToolCallVisibility;
@@ -27,6 +28,9 @@ export function ToolCallsAppearanceSection() {
   const preferences = useAtomValue(mobilePreferencesAtom);
   const selected = AsyncResult.isSuccess(preferences)
     ? (preferences.value.toolCallVisibility ?? "showAll")
+    : null;
+  const streamLiveThinking = AsyncResult.isSuccess(preferences)
+    ? (preferences.value.streamLiveThinking ?? false)
     : null;
 
   return (
@@ -49,6 +53,23 @@ export function ToolCallsAppearanceSection() {
         <T>
           Hide the commands, edits, and searches agents run. Hide successful keeps failures. Zen
           shows only final answers. Approvals, questions, and errors always show.
+        </T>
+      </Text>
+      <SettingsSection title={gt("Thinking")}>
+        <SettingsSwitchRow
+          disabled={streamLiveThinking === null}
+          icon="brain"
+          label={gt("Stream live thinking")}
+          onValueChange={(enabled) => {
+            void savePreferences({ streamLiveThinking: enabled });
+          }}
+          value={streamLiveThinking === true}
+        />
+      </SettingsSection>
+      <Text className="px-2 text-sm text-foreground-muted">
+        <T>
+          Progressively reveal each thinking block line by line in a fixed-height preview while the
+          agent works, instead of showing only the latest summary line.
         </T>
       </Text>
     </View>

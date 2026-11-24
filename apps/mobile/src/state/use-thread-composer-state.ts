@@ -103,7 +103,11 @@ import {
   useComposerDraft,
   useComposerDraftSettings,
 } from "./use-composer-drafts";
-import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
+import {
+  isClearComposerCommand,
+  parseDreamCommand,
+  parseSideChatCommand,
+} from "@t3tools/shared/composerTrigger";
 import { orchestrationV2WorktreePending } from "@t3tools/shared/orchestrationV2ThreadError";
 import {
   compactionBlocksSteering,
@@ -532,8 +536,8 @@ export function useThreadComposerState(input: {
       );
       return;
     }
-    // A queued message stays in its thread, so saving `/side` would send it to main.
-    if (parseSideChatCommand(text)) {
+    // A queued message stays in its thread, so saving `/side` or `/dream` would send it to main.
+    if (parseSideChatCommand(text) || parseDreamCommand(text)) {
       Dialog.alert(
         m(msg("Queued message not updated")),
         m(
@@ -698,12 +702,28 @@ export function useThreadComposerState(input: {
       return null;
     }
 
-    // A redirect's text answers its approval, so `/side` there is that text, not the command.
-    const sideChatCommand = beforeDispatch === undefined ? parseSideChatCommand(text) : null;
+    // A redirect's text answers its approval, so `/side` or `/dream` there is that text, not the command.
+    const sideChatCommand =
+      beforeDispatch === undefined
+        ? (() => {
+            const btw = parseSideChatCommand(text);
+            if (btw !== null) return { kind: "btw" as const, prompt: btw.prompt };
+            const dream = parseDreamCommand(text);
+            if (dream !== null) {
+              return {
+                kind: "dream" as const,
+                prompt:
+                  dream.prompt || "Consolidate durable memory and documentation from this session.",
+              };
+            }
+            return null;
+          })()
+        : null;
     if (sideChatCommand) {
       if (sideChatUnavailableReason !== null) {
         Dialog.alert(m(msg("Side chat not started")), sideChatUnavailableReason);
       } else if (
+        sideChatCommand.kind === "btw" &&
         sideChatCommand.prompt.length === 0 &&
         attachments.length === 0 &&
         (draft.context?.records.length ?? 0) === 0
@@ -744,11 +764,15 @@ export function useThreadComposerState(input: {
                 uploadedComposerContext(draft.context, attachments, prepared.attachments),
               ),
               attachments: prepared.attachments,
-              titleSeed: deriveThreadTitleSeed({ text: sideChatCommand.prompt, attachments }, m),
+              titleSeed:
+                sideChatCommand.kind === "dream"
+                  ? "Dream"
+                  : deriveThreadTitleSeed({ text: sideChatCommand.prompt, attachments }, m),
             },
             {
               runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
               modelSelection,
+              ...(sideChatCommand.kind === "dream" ? { sideChatKind: "dream" as const } : {}),
             },
           );
         });

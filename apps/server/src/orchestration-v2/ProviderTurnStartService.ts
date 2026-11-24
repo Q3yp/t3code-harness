@@ -2132,6 +2132,24 @@ export const layer: Layer.Layer<
             sideChatHandoff === undefined || compact || slashCommand
               ? ""
               : sideChatHandoff.summaryText;
+          // A /dream side chat injects the workspace's live DREAM.md at the tail of its first turn.
+          const dreamInstructions =
+            sideChatContext !== "" &&
+            projection.thread.lineage.sideChatKind === "dream" &&
+            turnInput.runtimePolicy.cwd !== null
+              ? yield* fileSystem
+                  .readFileString(path.join(turnInput.runtimePolicy.cwd, "DREAM.md"))
+                  .pipe(
+                    Effect.map((content) => {
+                      const trimmed = content.trim();
+                      if (trimmed.length === 0) return "";
+                      const capped =
+                        trimmed.length > 16_000 ? `${trimmed.slice(0, 16_000)}\n...` : trimmed;
+                      return `<dream_instructions>\n${capped}\n</dream_instructions>`;
+                    }),
+                    Effect.orElseSucceed(() => ""),
+                  )
+              : "";
           // Record inline handoffs before startTurn so an immediate dropped terminal can restore them.
           inlineDeliveredHandoffs = [
             ...delivery.inlineHandoffs.map((handoff) =>
@@ -2141,7 +2159,7 @@ export const layer: Layer.Layer<
             ),
             ...(sideChatContext === "" || sideChatHandoff === undefined ? [] : [sideChatHandoff]),
           ];
-          const context = [delivery.context, sideChatContext, restartNote]
+          const context = [delivery.context, sideChatContext, dreamInstructions, restartNote]
             .filter((part) => part !== "")
             .join("\n\n");
           const { restartContinuationOfRunId: _resumedRunId, ...promptedInput } = turnInput;

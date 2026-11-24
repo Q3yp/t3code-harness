@@ -373,6 +373,7 @@ export interface ThreadFeedHistoryControls {
 
 export interface ThreadFeedProps {
   readonly toolCallVisibility?: ToolCallVisibility;
+  readonly streamLiveThinking?: boolean;
   readonly worktreeSetup?: WorktreeSetupCardProps | null;
   readonly preparingWorktree?: boolean;
   readonly queuedMessages: ReadonlyArray<QueuedThreadMessage>;
@@ -2176,6 +2177,7 @@ function renderFeedEntry(
         hasFailure={entry.hasFailure}
         shimmer={entry.shimmer}
         thought={entry.thought}
+        thoughtStream={entry.thoughtStream}
         trailing={
           entry.checkpointSummary ? (
             <TurnDiffStat
@@ -3050,7 +3052,11 @@ function useThreadFeedPresentation(
       props.activeWorkStartedAt,
       props.runlessWorkActive ?? false,
       feedCache,
-      { toolCallVisibility: props.toolCallVisibility ?? "showAll", revealedMessageId },
+      {
+        toolCallVisibility: props.toolCallVisibility ?? "showAll",
+        streamLiveThinking: props.streamLiveThinking ?? false,
+        revealedMessageId,
+      },
       messages,
       locale,
     ),

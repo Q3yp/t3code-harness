@@ -69,6 +69,7 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 
 import {
+  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   FolderIcon,
@@ -78,8 +79,9 @@ import {
   SettingsIcon,
 } from "lucide-react";
 import {
+  activeWorkspaceFromSummary,
   encodeWorkspaceScopeKey,
-  findContainingAgentWorkspace,
+  groupEntriesByAgentWorkspace,
   isPathWithinWorkspace,
   isWorkspaceScopeKey,
   parseWorkspaceScopeKey,
@@ -142,6 +144,8 @@ import {
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
+import { useScratchProject } from "../hooks/useScratchProject";
+import { useMasterAssistant } from "../hooks/useMasterAssistant";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
 import { isCommandPaletteOpen, openCommandPalette } from "../commandPaletteBus";
 import { registerSettleAndAdvance } from "../settleAndAdvance";
@@ -192,6 +196,7 @@ import {
 import {
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
+  hasUnseenCompletion,
   threadMatchesWorkspaceScopes,
   type SidebarWorkspaceScope,
   groupSidebarThreadsByProject,
@@ -270,7 +275,7 @@ import {
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
-import { TooltipProvider } from "./ui/tooltip";
+import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
   DraftId,
@@ -868,43 +873,38 @@ function useSidebarLookups() {
   const projectGroupByScopeKey = new Map(
     projectGroups.map((project) => [project.projectKey, project] as const),
   );
+  const pickableGroups = pickableProjectGroups(projectGroups);
+  const {
+    exactByWorkspacePath: exactProjectGroupByWorkspacePath,
+    nestedByWorkspacePath: nestedProjectsByWorkspacePath,
+    standalone: standaloneProjectGroups,
+  } = groupEntriesByAgentWorkspace({
+    entries: pickableGroups,
+    workspaces: primaryEnvironmentId === null ? [] : primaryAgentWorkspaces,
+    getPath: (group) => {
+      if (primaryEnvironmentId === null) return null;
+      return (
+        group.memberProjects.find((member) => member.environmentId === primaryEnvironmentId)
+          ?.workspaceRoot ?? null
+      );
+    },
+  });
   const workspaceByScopeKey = new Map(
     primaryEnvironmentId === null
       ? []
       : primaryAgentWorkspaces.map((workspace) => [
           encodeWorkspaceScopeKey(primaryEnvironmentId, workspace.path),
-          { environmentId: primaryEnvironmentId, workspace },
+          {
+            environmentId: primaryEnvironmentId,
+            workspace,
+            exactProjectGroup: exactProjectGroupByWorkspacePath.get(workspace.path) ?? null,
+          },
         ]),
   );
-  const pickableGroups = pickableProjectGroups(projectGroups);
-  const nestedProjectsByWorkspaceKey = new Map<string, Array<(typeof pickableGroups)[number]>>();
-  const standaloneProjectGroups: Array<(typeof pickableGroups)[number]> = [];
-  for (const group of pickableGroups) {
-    const primaryMember =
-      primaryEnvironmentId === null
-        ? null
-        : (group.memberProjects.find((member) => member.environmentId === primaryEnvironmentId) ??
-          null);
-    const containing = primaryMember
-      ? findContainingAgentWorkspace(primaryMember.workspaceRoot, primaryAgentWorkspaces)
-      : null;
-    if (
-      containing &&
-      primaryEnvironmentId !== null &&
-      primaryMember &&
-      !workspacePathsEqual(primaryMember.workspaceRoot, containing.path)
-    ) {
-      const scopeKey = encodeWorkspaceScopeKey(primaryEnvironmentId, containing.path);
-      const list = nestedProjectsByWorkspaceKey.get(scopeKey) ?? [];
-      list.push(group);
-      nestedProjectsByWorkspaceKey.set(scopeKey, list);
-    } else {
-      standaloneProjectGroups.push(group);
-    }
-  }
   const projectScopeItems: Array<{
     readonly value: string;
     readonly label: string;
+    readonly description?: string;
     readonly nestedUnderWorkspace?: boolean;
   }> = [
     { value: ADD_PROJECT_SCOPE_ITEM_VALUE, label: gt("Add project") },
@@ -913,8 +913,12 @@ function useSidebarLookups() {
   if (primaryEnvironmentId !== null) {
     for (const workspace of primaryAgentWorkspaces) {
       const workspaceKey = encodeWorkspaceScopeKey(primaryEnvironmentId, workspace.path);
-      projectScopeItems.push({ value: workspaceKey, label: workspace.name });
-      for (const project of nestedProjectsByWorkspaceKey.get(workspaceKey) ?? []) {
+      projectScopeItems.push({
+        value: workspaceKey,
+        label: workspace.name,
+        description: workspace.description,
+      });
+      for (const project of nestedProjectsByWorkspacePath.get(workspace.path) ?? []) {
         projectScopeItems.push({
           value: project.projectKey,
           label: project.displayName,
@@ -1084,6 +1088,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const newThreadContext = useHandleNewThread();
   // Row callbacks capture only the handler; the rest of the context changes with the route.
   const { handleNewThread } = newThreadContext;
+  const { openScratchProject } = useScratchProject();
+  const {
+    masterEnvironmentId,
+    masterWorkspaceRoot,
+    masterProjectKeys,
+    masterThread,
+    isOpening: isOpeningMaster,
+    openMaster,
+  } = useMasterAssistant();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const clearSelection = useThreadSelectionStore((s) => s.clearSelection);
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
@@ -1229,6 +1242,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             ? asLaunchingThread(thread)
             : thread,
         );
+  const nonMasterListedThreads =
+    masterProjectKeys.size === 0
+      ? listedThreads
+      : listedThreads.filter(
+          (thread) => !masterProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
+        );
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -1294,7 +1313,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     items: projectScopeItems,
     query: projectScopeMenuState.query,
     matches: (item, query) =>
-      projectScopeFilter.contains(item, query, (candidate) => candidate.label),
+      projectScopeFilter.contains(item, query, (candidate) => candidate.label) ||
+      (item.description !== undefined &&
+        projectScopeFilter.contains(item, query, (candidate) => candidate.description ?? "")),
   });
   const scopedProjectGroups = revealWidensScope ? [] : chosenProjectGroups;
   const scopedWorkspaces = revealWidensScope ? [] : chosenWorkspaceScopes;
@@ -1471,7 +1492,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     serverConfigs,
     connectedEnvironmentIds,
     optimisticDrop,
-    threads: listedThreads,
+    threads: nonMasterListedThreads,
     delegatedUnderParent,
     routeRowThreadKey,
     departingThreadKey,
@@ -1564,12 +1585,22 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const settledThreadKeysRef = useRef(settledThreadKeys);
   const snoozedThreadKeysRef = useRef(snoozedThreadKeys);
 
-  const { draftIds, routeDraftComposer } = useSidebarDrafts(
+  const { draftIds: rawDraftIds, routeDraftComposer } = useSidebarDrafts(
     scopedProjectKeys,
     routeDraftIdForRows,
     draftTerminalLabels,
     scopedWorkspaces,
   );
+  const draftIds =
+    masterProjectKeys.size === 0
+      ? rawDraftIds
+      : rawDraftIds.filter((draftId) => {
+          const draftSession = useComposerDraftStore.getState().draftThreadsByThreadKey[draftId];
+          return (
+            !draftSession ||
+            !masterProjectKeys.has(`${draftSession.environmentId}:${draftSession.projectId}`)
+          );
+        });
   // Draft rows sit above the threads, so jumps and traversal reach them first.
   // Search hides them, so they drop out while it is open.
   const listedDraftIds = isSearchingThreads ? EMPTY_DRAFT_IDS : draftIds;
@@ -3123,7 +3154,44 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       )
     : null;
 
+  const startWorkspaceThread = useStableCallback(
+    async (entry: NonNullable<ReturnType<typeof workspaceByScopeKey.get>>) => {
+      const nextWorkspace = activeWorkspaceFromSummary(entry.workspace);
+      const exactProject = projects.find(
+        (project) =>
+          project.environmentId === entry.environmentId &&
+          workspacePathsEqual(project.workspaceRoot, entry.workspace.path),
+      );
+      if (exactProject) {
+        await handleNewThread(scopeProjectRef(exactProject.environmentId, exactProject.id), {
+          activeWorkspace: nextWorkspace,
+        });
+        return;
+      }
+      const scratchProject = await openScratchProject(entry.environmentId);
+      if (scratchProject) {
+        await handleNewThread(scopeProjectRef(scratchProject.environmentId, scratchProject.id), {
+          activeWorkspace: nextWorkspace,
+          envMode: "local",
+        });
+      }
+    },
+  );
+
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
+    if (
+      !event?.shiftKey &&
+      !boringSidebarEnabled &&
+      scopedWorkspaceEntries.length === 1 &&
+      scopedProjectGroups.length === 0
+    ) {
+      const workspaceEntry = scopedWorkspaceEntries[0];
+      if (workspaceEntry) {
+        if (isMobile) setOpenMobile(false);
+        void startWorkspaceThread(workspaceEntry);
+        return;
+      }
+    }
     const scopedProjectRef = resolveScopedNewThreadProjectRef({
       shiftKey: event?.shiftKey ?? false,
       // The folder sidebar's header button always opens the picker.
@@ -3275,7 +3343,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           return;
                         }
                         const scopeKey = highlightedProjectScopeKeyRef.current;
-                        const project = scopeKey ? projectGroupByScopeKey.get(scopeKey) : null;
+                        const highlightedWorkspace = scopeKey
+                          ? (workspaceByScopeKey.get(scopeKey) ?? null)
+                          : null;
+                        const project =
+                          (scopeKey ? projectGroupByScopeKey.get(scopeKey) : null) ??
+                          highlightedWorkspace?.exactProjectGroup ??
+                          null;
                         // The thread pin shortcut pins the highlighted project here.
                         if (
                           project &&
@@ -3289,9 +3363,13 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         }
                         if (event.ctrlKey || event.altKey || event.metaKey) return;
                         if (event.shiftKey && event.key === "Enter") {
-                          if (!project) return;
+                          const toggleKey =
+                            highlightedWorkspace && scopeKey
+                              ? scopeKey
+                              : (project?.projectKey ?? null);
+                          if (!toggleKey) return;
                           event.preventDefault();
-                          toggleProjectScopeKey(project.projectKey);
+                          toggleProjectScopeKey(toggleKey);
                           return;
                         }
                         if (
@@ -3326,6 +3404,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                         }
                         const workspaceEntry = workspaceByScopeKey.get(item.value) ?? null;
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
+                        const rowProjectGroup =
+                          project ?? workspaceEntry?.exactProjectGroup ?? null;
                         const isSelected =
                           workspaceEntry || project
                             ? projectScopeKeys.includes(item.value)
@@ -3339,7 +3419,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             // The icon badge marks selection; Base UI's single value would shade one row.
                             data-selected={undefined}
                             onContextMenu={(event) => {
-                              if (project) handleProjectSettings(event, project);
+                              if (rowProjectGroup) handleProjectSettings(event, rowProjectGroup);
                             }}
                           >
                             {item.nestedUnderWorkspace ? (
@@ -3371,18 +3451,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 machineByEnvironmentId={environmentMachineById}
                               />
                             ) : null}
-                            {project ? (
+                            {rowProjectGroup ? (
                               <ProjectRowActions
                                 pin={
-                                  canPinProject(project) ? (
+                                  canPinProject(rowProjectGroup) ? (
                                     <ProjectPinButton
-                                      name={project.displayName}
-                                      pinned={project.pinned}
+                                      name={rowProjectGroup.displayName}
+                                      pinned={rowProjectGroup.pinned}
                                       shortcutLabel={shortcutLabelForCommand(
                                         keybindings,
                                         "thread.pin",
                                       )}
-                                      onToggle={() => toggleProjectGroupPin(project)}
+                                      onToggle={() => toggleProjectGroupPin(rowProjectGroup)}
                                     />
                                   ) : null
                                 }
@@ -3393,11 +3473,11 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                     tabIndex={-1}
                                     aria-hidden="true"
                                     title={gt("Project settings for {project}", {
-                                      project: project.displayName,
+                                      project: rowProjectGroup.displayName,
                                     })}
                                     onPointerDown={(event) => event.stopPropagation()}
                                     onClick={(event) => {
-                                      void handleProjectSettings(event, project);
+                                      void handleProjectSettings(event, rowProjectGroup);
                                     }}
                                   >
                                     <SettingsIcon className="size-3.5" />
@@ -3438,6 +3518,86 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
             />
+            {masterEnvironmentId !== null
+              ? (() => {
+                  const masterThreadKey = masterThread ? threadShellKey(masterThread) : null;
+                  const isMasterRouteActive =
+                    (masterThreadKey !== null && routeRowThreadKey === masterThreadKey) ||
+                    (routeDraftThread !== null &&
+                      masterProjectKeys.has(
+                        `${routeDraftThread.environmentId}:${routeDraftThread.projectId}`,
+                      ));
+                  const masterWorking = masterThread !== null && isThreadWorking(masterThread);
+                  const masterUnread =
+                    masterThread !== null &&
+                    !isMasterRouteActive &&
+                    hasUnseenCompletion(masterThread);
+                  return (
+                    <TooltipProvider delay={300}>
+                      <Tooltip>
+                        <TooltipTrigger
+                          render={
+                            <button
+                              type="button"
+                              data-testid="sidebar-master-slot"
+                              disabled={isOpeningMaster}
+                              onClick={() => {
+                                if (isMobile) setOpenMobile(false);
+                                void openMaster();
+                              }}
+                              className={cn(
+                                "mt-1.5 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
+                                isMasterRouteActive
+                                  ? "bg-sidebar-row-active text-sidebar-foreground"
+                                  : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
+                              )}
+                            >
+                              <BotIcon
+                                className={cn(
+                                  "size-3.5 shrink-0",
+                                  masterWorking
+                                    ? "animate-pulse text-primary"
+                                    : isMasterRouteActive
+                                      ? "text-primary"
+                                      : "text-sidebar-muted-foreground",
+                                )}
+                                aria-hidden
+                              />
+                              <span className="min-w-0 flex-1 truncate">
+                                {masterThread?.title && masterThread.title !== "New thread"
+                                  ? masterThread.title
+                                  : gt("Master")}
+                              </span>
+                              {masterWorking ? (
+                                <span className="shrink-0 text-2xs text-primary">
+                                  <T>Working</T>
+                                </span>
+                              ) : masterUnread ? (
+                                <span
+                                  className="size-1.5 shrink-0 rounded-full bg-primary"
+                                  aria-label={gt("Unread")}
+                                />
+                              ) : null}
+                            </button>
+                          }
+                        />
+                        {masterWorkspaceRoot ? (
+                          <TooltipPopup side="right">
+                            <div className="space-y-0.5">
+                              <div className="font-medium">
+                                <T>Master Assistant</T>
+                              </div>
+                              <div className="font-mono text-2xs opacity-80">
+                                {masterWorkspaceRoot}
+                              </div>
+                            </div>
+                          </TooltipPopup>
+                        ) : null}
+                      </Tooltip>
+                    </TooltipProvider>
+                  );
+                })()
+              : null}
           </SidebarGroup>
         }
       >

@@ -32,7 +32,7 @@ export type ComposerTriggerKind =
   | "slash-command"
   | "skill"
   | "subagent-preset";
-export type ComposerSlashCommand = "model" | "side" | "btw" | "clear";
+export type ComposerSlashCommand = "model" | "side" | "btw" | "dream" | "clear";
 export type ComposerSubmissionIntent = "foreground" | "background" | "alternate";
 
 export interface ComposerTrigger {

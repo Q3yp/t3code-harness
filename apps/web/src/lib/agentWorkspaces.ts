@@ -29,7 +29,7 @@ export function isPathWithinWorkspace(candidatePath: string, workspacePath: stri
   return candidate.startsWith(prefix);
 }
 
-export function findContainingAgentWorkspace<T extends Pick<AgentWorkspaceSummary, "path">>(
+function findContainingAgentWorkspace<T extends Pick<AgentWorkspaceSummary, "path">>(
   folderPath: string | null | undefined,
   workspaces: ReadonlyArray<T>,
 ): T | null {
@@ -75,4 +75,39 @@ export function activeWorkspaceFromSummary(
   workspace: Pick<AgentWorkspaceSummary, "name" | "path">,
 ): ThreadActiveWorkspace {
   return { name: workspace.name, path: workspace.path };
+}
+
+export function groupEntriesByAgentWorkspace<
+  T,
+  W extends Pick<AgentWorkspaceSummary, "path">,
+>(input: {
+  readonly entries: ReadonlyArray<T>;
+  readonly workspaces: ReadonlyArray<W>;
+  readonly getPath: (entry: T) => string | null;
+}): {
+  readonly exactByWorkspacePath: Map<string, T>;
+  readonly nestedByWorkspacePath: Map<string, Array<T>>;
+  readonly standalone: Array<T>;
+} {
+  const exactByWorkspacePath = new Map<string, T>();
+  const nestedByWorkspacePath = new Map<string, Array<T>>();
+  const standalone: Array<T> = [];
+  for (const entry of input.entries) {
+    const entryPath = input.getPath(entry);
+    const containing = entryPath ? findContainingAgentWorkspace(entryPath, input.workspaces) : null;
+    if (!containing || !entryPath) {
+      standalone.push(entry);
+      continue;
+    }
+    if (workspacePathsEqual(entryPath, containing.path)) {
+      if (!exactByWorkspacePath.has(containing.path)) {
+        exactByWorkspacePath.set(containing.path, entry);
+      }
+      continue;
+    }
+    const list = nestedByWorkspacePath.get(containing.path) ?? [];
+    list.push(entry);
+    nestedByWorkspacePath.set(containing.path, list);
+  }
+  return { exactByWorkspacePath, nestedByWorkspacePath, standalone };
 }

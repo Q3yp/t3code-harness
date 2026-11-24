@@ -51,6 +51,7 @@ import {
   AuthOrchestrationOperateScope,
   AuthSourceControlWriteScope,
   AuthFilesystemReadScope,
+  type AgentWorkspaceSummary,
   type DesktopWslState,
   type EnvironmentId,
   type FilesystemBrowseResult,
@@ -61,6 +62,7 @@ import {
 import { useLocation, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeftIcon,
+  BotIcon,
   BugIcon,
   ChartNoAxesColumnIcon,
   CheckIcon,
@@ -70,6 +72,7 @@ import {
   FolderGit2Icon,
   FolderIcon,
   FolderPlusIcon,
+  LayersIcon,
   MessageSquareDashedIcon,
   LinkIcon,
   MessageSquareIcon,
@@ -131,6 +134,14 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { useOrchestrationCommand } from "../state/use-orchestration-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useScratchProject } from "../hooks/useScratchProject";
+import { useMasterAssistant } from "../hooks/useMasterAssistant";
+import {
+  activeWorkspaceFromSummary,
+  groupEntriesByAgentWorkspace,
+  isPathWithinWorkspace,
+  workspacePathsEqual,
+} from "~/lib/agentWorkspaces";
+import { useEnvironmentAgentWorkspaces } from "~/state/agentWorkspaces";
 import { useWorkflowEnvironmentIds } from "./workflows/useWorkflowEnvironmentIds";
 import { useStartTriage } from "../hooks/useStartTriage";
 import { pickTriageEnvironment } from "../lib/triageTarget";
@@ -480,7 +491,9 @@ function OpenCommandPaletteDialog(props: {
   const updateProject = useOrchestrationCommand(projectEnvironment.update, {
     label: "project unarchive",
   });
-  const { scratchEnvironmentId, scratchWorkspaceRootFor, startScratchThread } = useScratchProject();
+  const { scratchEnvironmentId, scratchWorkspaceRootFor, openScratchProject, startScratchThread } =
+    useScratchProject();
+  const { masterEnvironmentId, masterProjectKeys, openMaster } = useMasterAssistant();
   const startTriage = useStartTriage();
   const lookupRepository = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
@@ -737,6 +750,9 @@ function OpenCommandPaletteDialog(props: {
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
   const scratchTargetEnvironmentId = scratchEnvironmentId(currentProjectEnvironmentId);
+  const workspaceEnvironmentId =
+    currentProjectEnvironmentId ?? scratchTargetEnvironmentId ?? primaryEnvironmentId;
+  const { workspaces: agentWorkspaces } = useEnvironmentAgentWorkspaces(workspaceEnvironmentId);
   const supportsTriage = (environmentId: EnvironmentId | null) =>
     environments.find((environment) => environment.environmentId === environmentId)?.serverConfig
       ?.environment.capabilities.triage === true;
@@ -873,18 +889,120 @@ function OpenCommandPaletteDialog(props: {
     await handleNewThread(scopeProjectRef(project.environmentId, project.id));
   };
 
+  const startWorkspaceThread = async (workspace: AgentWorkspaceSummary) => {
+    const nextWorkspace = activeWorkspaceFromSummary(workspace);
+    const exactProject = projects.find(
+      (project) =>
+        project.environmentId === workspaceEnvironmentId &&
+        workspacePathsEqual(project.workspaceRoot, workspace.path),
+    );
+    if (exactProject) {
+      await handleNewThread(scopeProjectRef(exactProject.environmentId, exactProject.id), {
+        activeWorkspace: nextWorkspace,
+      });
+      return;
+    }
+    const targetEnvId = workspaceEnvironmentId ?? scratchTargetEnvironmentId;
+    if (targetEnvId !== null) {
+      const scratchProject = await openScratchProject(targetEnvId);
+      if (scratchProject) {
+        await handleNewThread(scopeProjectRef(scratchProject.environmentId, scratchProject.id), {
+          activeWorkspace: nextWorkspace,
+          envMode: "local",
+        });
+      }
+    }
+  };
+
+  const openWorkspaceFromSearch = async (workspace: AgentWorkspaceSummary) => {
+    // oxlint-disable-next-line react/purity -- runs in an event handler (oxc#27309)
+    const now = new Date().toISOString();
+    const openableThreads = threads.filter(
+      (thread) => thread.settledOverride !== "settled" && !effectiveSnoozed(thread, { now }),
+    );
+    const workspaceProjectKeys = new Set(
+      projects
+        .filter(
+          (project) =>
+            project.environmentId === workspaceEnvironmentId &&
+            isPathWithinWorkspace(project.workspaceRoot, workspace.path),
+        )
+        .map((project) => `${project.environmentId}:${project.id}`),
+    );
+    const latestThread =
+      sortThreads(
+        openableThreads.filter(
+          (thread) =>
+            thread.archivedAt === null &&
+            thread.environmentId === workspaceEnvironmentId &&
+            ((thread.activeWorkspace &&
+              isPathWithinWorkspace(thread.activeWorkspace.path, workspace.path)) ||
+              workspaceProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+        ),
+        clientSettings.sidebarThreadSortOrder,
+      )[0] ?? null;
+    if (latestThread) {
+      await navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(scopeThreadRef(latestThread.environmentId, latestThread.id)),
+      });
+      return;
+    }
+    await startWorkspaceThread(workspace);
+  };
+
   // Pinning from a row keeps rows in place while the palette is open.
   const projectSearchItems = useOrderWhileOpen(
-    buildProjectSearchItems(
-      {
-        projects: pickerProjects,
-        projectGroupByTargetKey,
-        locationByEnvironmentId: projectEnvironmentLocationById,
-        runProject: openProjectFromSearch,
-        pin: projectPin,
-      },
-      messages,
-    ),
+    (() => {
+      const baseProjectItems = buildProjectSearchItems(
+        {
+          projects: pickerProjects,
+          projectGroupByTargetKey,
+          locationByEnvironmentId: projectEnvironmentLocationById,
+          runProject: openProjectFromSearch,
+          pin: projectPin,
+        },
+        messages,
+      );
+      if (agentWorkspaces.length === 0) return baseProjectItems;
+      const itemByProjectKey = new Map(
+        pickerProjects.map(
+          (project, index) =>
+            [`${project.environmentId}:${project.id}`, baseProjectItems[index]!] as const,
+        ),
+      );
+      const { exactByWorkspacePath, nestedByWorkspacePath, standalone } =
+        groupEntriesByAgentWorkspace({
+          entries: pickerProjects,
+          workspaces: agentWorkspaces,
+          getPath: (project) =>
+            project.environmentId === workspaceEnvironmentId ? project.workspaceRoot : null,
+        });
+      const items: CommandPaletteActionItem[] = [];
+      for (const workspace of agentWorkspaces) {
+        const exactProject = exactByWorkspacePath.get(workspace.path);
+        const pin = exactProject ? projectPin(exactProject) : null;
+        items.push({
+          kind: "action",
+          value: `project:workspace:${workspace.path}`,
+          searchTerms: [workspace.name, workspace.description, workspace.path, "workspace"],
+          title: workspace.name,
+          description: workspace.description || workspace.path,
+          icon: <LayersIcon className="size-4 text-primary" />,
+          ...(pin ? { pin } : {}),
+          run: () => openWorkspaceFromSearch(workspace),
+        });
+        for (const project of nestedByWorkspacePath.get(workspace.path) ?? []) {
+          const item = itemByProjectKey.get(`${project.environmentId}:${project.id}`);
+          if (item) items.push({ ...item, nested: true });
+        }
+      }
+      for (const project of standalone) {
+        const item = itemByProjectKey.get(`${project.environmentId}:${project.id}`);
+        if (item) items.push(item);
+      }
+      return items;
+    })(),
     rowOrderKey("project"),
     true,
   );
@@ -897,8 +1015,12 @@ function OpenCommandPaletteDialog(props: {
         currentProjectId === null
           ? undefined
           : projectPickerEntries.find((entry) => entry.isPreferred);
-      const projectItems = buildNewThreadInProjectItems({
-        projects: pickerProjects.filter((project) => !isScratch(project)),
+      const nonScratchProjects = pickerProjects.filter(
+        (project) =>
+          !isScratch(project) && !masterProjectKeys.has(`${project.environmentId}:${project.id}`),
+      );
+      const baseProjectItems = buildNewThreadInProjectItems({
+        projects: nonScratchProjects,
         currentProjectKey: currentEntry
           ? `${currentEntry.targetProject.environmentId}:${currentEntry.targetProject.id}`
           : null,
@@ -919,21 +1041,67 @@ function OpenCommandPaletteDialog(props: {
             contextualProjectIsEligible
               ? contextualProjectRef
               : scopeProjectRef(project.environmentId, project.id),
+            { activeWorkspace: null },
           );
         },
       });
+      const projectItems: CommandPaletteActionItem[] =
+        agentWorkspaces.length === 0
+          ? baseProjectItems
+          : (() => {
+              const itemByProjectKey = new Map(
+                nonScratchProjects.map(
+                  (project, index) =>
+                    [`${project.environmentId}:${project.id}`, baseProjectItems[index]!] as const,
+                ),
+              );
+              const { exactByWorkspacePath, nestedByWorkspacePath, standalone } =
+                groupEntriesByAgentWorkspace({
+                  entries: nonScratchProjects,
+                  workspaces: agentWorkspaces,
+                  getPath: (project) =>
+                    project.environmentId === workspaceEnvironmentId ? project.workspaceRoot : null,
+                });
+              const items: CommandPaletteActionItem[] = [];
+              for (const workspace of agentWorkspaces) {
+                const exactProject = exactByWorkspacePath.get(workspace.path);
+                const pin = exactProject ? projectPin(exactProject) : null;
+                items.push({
+                  kind: "action",
+                  value: `new-thread-in:workspace:${workspace.path}`,
+                  searchTerms: [workspace.name, workspace.description, workspace.path, "workspace"],
+                  title: workspace.name,
+                  description: workspace.description || workspace.path,
+                  icon: <LayersIcon className="size-4 text-primary" />,
+                  ...(pin ? { pin } : {}),
+                  run: () => startWorkspaceThread(workspace),
+                });
+                for (const project of nestedByWorkspacePath.get(workspace.path) ?? []) {
+                  const item = itemByProjectKey.get(`${project.environmentId}:${project.id}`);
+                  if (item) items.push({ ...item, nested: true });
+                }
+              }
+              for (const project of standalone) {
+                const item = itemByProjectKey.get(`${project.environmentId}:${project.id}`);
+                if (item) items.push(item);
+              }
+              return items;
+            })();
       if (scratchTargetEnvironmentId === null) return projectItems;
 
-      const noProjectIndex = newThreadNoProjectIndex(
-        projectPickerEntries.map(({ group, targetProject, isPreferred }) => ({
-          isScratch: isScratchProject(
-            targetProject,
-            scratchWorkspaceRootFor(targetProject.environmentId),
-          ),
-          pinned: group.pinned,
-          isPreferred,
-        })),
-      );
+      const noProjectIndex =
+        agentWorkspaces.length > 0
+          ? projectItems.length
+          : newThreadNoProjectIndex(
+              projectPickerEntries.map(({ group, targetProject, isPreferred }) => ({
+                isScratch: isScratchProject(
+                  targetProject,
+                  scratchWorkspaceRootFor(targetProject.environmentId),
+                ),
+                pinned: group.pinned,
+                isPreferred,
+              })),
+            );
       return [
         ...projectItems.slice(0, noProjectIndex),
         {
@@ -1340,8 +1508,10 @@ function OpenCommandPaletteDialog(props: {
 
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
-  if (projects.length > 0) {
+  if (projects.length > 0 || agentWorkspaces.length > 0) {
     const activeProjectTitle =
+      activeThread?.activeWorkspace?.name ??
+      activeDraftThread?.activeWorkspace?.name ??
       projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
       currentProject?.title ??
       null;
@@ -1381,6 +1551,17 @@ function OpenCommandPaletteDialog(props: {
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: NEW_THREAD_IN_GROUP, label: gt("Projects"), items: projectThreadItems }],
+    });
+  }
+
+  if (masterEnvironmentId !== null) {
+    actionItems.push({
+      kind: "action",
+      value: "action:open-master",
+      searchTerms: ["master", "assistant", "bot", "home", "memory", "soul"],
+      title: gt("Open Master assistant"),
+      icon: <BotIcon className={ITEM_ICON_CLASS} />,
+      run: () => openMaster(),
     });
   }
 

@@ -836,17 +836,337 @@ export function toolGroupSummaryKind(
   return fallbackKinds.size === 1 ? fallbackKinds.values().next().value! : "mixed";
 }
 
-export function liveThoughtLine(markdown: string): string {
-  const heading = /^\s*\*\*([^*\r\n]+)\*\*[ \t]*\r?(?:\n|$)/.exec(markdown)?.[1];
-  const text = (heading ?? markdown)
+function flattenThoughtMarkdown(markdown: string): string {
+  return markdown
     .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
     .replace(/^[ \t]*(?:#{1,6}|[-*+]|\d+\.)[ \t]+/gm, "")
     .replace(/`+|\*\*|~~/g, "")
     .replace(/(^|[^\w*])[*_]([^*_\n]+)[*_](?![\w*])/g, "$1$2")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function liveThoughtLine(markdown: string): string {
+  const heading = /^\s*\*\*([^*\r\n]+)\*\*[ \t]*\r?(?:\n|$)/.exec(markdown)?.[1];
+  const text = flattenThoughtMarkdown(heading ?? markdown);
   if (heading !== undefined) return text;
   // CJK sentences end in full-width marks with no space after them.
   const end = /[.?!]["'”’)]?(?=\s)|[。！？]["'”’）」』]?/.exec(text);
   return end ? text.slice(0, end.index + end[0].length) : text;
+}
+
+export interface LiveThinkingLine {
+  readonly id: string;
+  readonly text: string;
+}
+
+export interface LiveThinkingBlock {
+  /** Stable key within one reasoning item while more lines stream into the same block. */
+  readonly key: string;
+  readonly heading: string | null;
+  readonly lines: ReadonlyArray<LiveThinkingLine>;
+}
+
+const DEFAULT_LIVE_THINKING_LINE_WIDTH = 88;
+const DEFAULT_LIVE_THINKING_MAX_LINES = 4;
+const CJK_WIDE_CHAR = /[\u2e80-\u9fff\uf900-\ufaff\uff00-\uffef\u3000-\u303f\uac00-\ud7af]/;
+const SENTENCE_BREAK = /[.?!]["'”’)]?(?=\s|$)|[。！？]["'”’）」』]?/g;
+const CLAUSE_BREAK = /[,;:，；：、]/;
+const BOLD_HEADING_PREFIX = /^\s*\*\*([^*\r\n]+)\*\*[ \t]*(?:\r?\n|$)/;
+const PENDING_BOLD_HEADING = /^\s*\*\*([^*\r\n]+)$/;
+
+function charVisualWidth(ch: string): number {
+  return CJK_WIDE_CHAR.test(ch) ? 1.8 : 1;
+}
+
+function wrapSentenceMonotonically(sentence: string, maxVisualWidth: number): string[] {
+  const trimmed = sentence.trim();
+  if (!trimmed) return [];
+  const lines: string[] = [];
+  let start = 0;
+  while (start < trimmed.length) {
+    while (start < trimmed.length && trimmed[start] === " ") start += 1;
+    if (start >= trimmed.length) break;
+    let width = 0;
+    let cursor = start;
+    let lastBreak = -1;
+    let lastClauseBreak = -1;
+    while (cursor < trimmed.length) {
+      const ch = trimmed[cursor]!;
+      const nextWidth = width + charVisualWidth(ch);
+      if (nextWidth > maxVisualWidth && cursor > start) break;
+      width = nextWidth;
+      cursor += 1;
+      if (ch === " ") {
+        lastBreak = cursor;
+      } else if (CLAUSE_BREAK.test(ch) && width >= maxVisualWidth * 0.45) {
+        lastClauseBreak = cursor;
+      }
+    }
+    if (cursor >= trimmed.length) {
+      lines.push(trimmed.slice(start).trim());
+      break;
+    }
+    const splitAt =
+      lastClauseBreak > start
+        ? lastClauseBreak
+        : lastBreak > start && lastBreak - start >= 12
+          ? lastBreak
+          : cursor;
+    const chunk = trimmed.slice(start, splitAt).trim();
+    if (chunk) lines.push(chunk);
+    start = splitAt;
+  }
+  return lines;
+}
+
+function splitParagraphIntoThoughtLines(paragraph: string, maxVisualWidth: number): string[] {
+  const result: string[] = [];
+  for (const rawLine of paragraph.split(/\r?\n/)) {
+    const clean = flattenThoughtMarkdown(rawLine);
+    if (!clean) continue;
+    let cursor = 0;
+    SENTENCE_BREAK.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = SENTENCE_BREAK.exec(clean)) !== null) {
+      const end = match.index + match[0].length;
+      const sentence = clean.slice(cursor, end).trim();
+      if (sentence) {
+        result.push(...wrapSentenceMonotonically(sentence, maxVisualWidth));
+      }
+      cursor = end;
+    }
+    const tail = clean.slice(cursor).trim();
+    if (tail) {
+      result.push(...wrapSentenceMonotonically(tail, maxVisualWidth));
+    }
+  }
+  return result;
+}
+
+/**
+ * Splits streaming reasoning markdown into fixed-budget display blocks for non-scrolling,
+ * line-by-line block replacement. Earlier blocks and completed lines stay stable as new
+ * tokens append to the end.
+ */
+export function liveThinkingBlocks(
+  markdown: string,
+  options?: {
+    readonly maxVisualWidth?: number;
+    readonly maxLinesPerBlock?: number;
+  },
+): ReadonlyArray<LiveThinkingBlock> {
+  const maxVisualWidth = options?.maxVisualWidth ?? DEFAULT_LIVE_THINKING_LINE_WIDTH;
+  const maxLinesPerBlock = Math.max(
+    2,
+    options?.maxLinesPerBlock ?? DEFAULT_LIVE_THINKING_MAX_LINES,
+  );
+  const rawParagraphs = markdown
+    .split(/\r?\n[ \t]*\r?\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter((paragraph) => paragraph.length > 0);
+  if (rawParagraphs.length === 0) return [];
+
+  const blocks: LiveThinkingBlock[] = [];
+  let currentHeading: string | null = null;
+  let pendingHeadingOnly = false;
+
+  const pushLines = (heading: string | null, lines: ReadonlyArray<string>) => {
+    const maxBodyLines = Math.max(1, heading ? maxLinesPerBlock - 1 : maxLinesPerBlock);
+    if (lines.length === 0) {
+      if (heading) {
+        blocks.push({ key: String(blocks.length), heading, lines: [] });
+      }
+      return;
+    }
+    for (let offset = 0; offset < lines.length; offset += maxBodyLines) {
+      const key = String(blocks.length);
+      blocks.push({
+        key,
+        heading,
+        lines: lines
+          .slice(offset, offset + maxBodyLines)
+          .map((text, lineOffset) => ({ id: `${key}:${lineOffset}`, text })),
+      });
+    }
+  };
+
+  for (let index = 0; index < rawParagraphs.length; index += 1) {
+    const paragraph = rawParagraphs[index]!;
+    const isLast = index === rawParagraphs.length - 1;
+    let body = paragraph;
+    const boldMatch = BOLD_HEADING_PREFIX.exec(paragraph);
+    if (boldMatch) {
+      const heading = flattenThoughtMarkdown(boldMatch[1]!);
+      currentHeading = heading || null;
+      body = paragraph.slice(boldMatch[0].length).trim();
+      if (!body) {
+        if (isLast) {
+          pushLines(currentHeading, []);
+          pendingHeadingOnly = false;
+        } else {
+          pendingHeadingOnly = true;
+        }
+        continue;
+      }
+      pendingHeadingOnly = false;
+    } else if (isLast && PENDING_BOLD_HEADING.test(paragraph)) {
+      const pending = PENDING_BOLD_HEADING.exec(paragraph);
+      const heading = pending ? flattenThoughtMarkdown(pending[1]!) : "";
+      if (heading) {
+        currentHeading = heading;
+        pushLines(currentHeading, []);
+        pendingHeadingOnly = false;
+        continue;
+      }
+    }
+
+    const lines = splitParagraphIntoThoughtLines(body, maxVisualWidth);
+    if (lines.length === 0) continue;
+    pendingHeadingOnly = false;
+    pushLines(currentHeading, lines);
+  }
+
+  if (pendingHeadingOnly && currentHeading) {
+    pushLines(currentHeading, []);
+  }
+  return blocks;
+}
+
+export const LIVE_THINKING_LINE_INTERVAL_MS = 165;
+export const LIVE_THINKING_MIN_DWELL_MS = 650;
+export const LIVE_THINKING_CLEAR_MS = 170;
+
+export interface LiveThinkingDisplayState {
+  readonly blockKey: string;
+  readonly block: LiveThinkingBlock;
+  readonly revealedCount: number;
+  readonly phase: "showing" | "clearing";
+}
+
+export type LiveThinkingTimerPlan =
+  | { readonly kind: "commit-cleared"; readonly delayMs: number }
+  | { readonly kind: "begin-clear"; readonly delayMs: number }
+  | { readonly kind: "reveal-next"; readonly delayMs: number };
+
+function liveThinkingBlockSlotCount(block: LiveThinkingBlock): number {
+  return (block.heading ? 1 : 0) + block.lines.length;
+}
+
+function sameLiveThinkingBlockContent(left: LiveThinkingBlock, right: LiveThinkingBlock): boolean {
+  if (left.key !== right.key || left.heading !== right.heading) return false;
+  if (left.lines.length !== right.lines.length) return false;
+  for (let index = 0; index < left.lines.length; index += 1) {
+    if (left.lines[index]?.text !== right.lines[index]?.text) return false;
+  }
+  return true;
+}
+
+export function createInitialLiveThinkingDisplay(input: {
+  readonly blockKey: string;
+  readonly block: LiveThinkingBlock | undefined;
+  readonly blockCount: number;
+  readonly active: boolean;
+  readonly reducedMotion: boolean;
+}): LiveThinkingDisplayState | null {
+  if (!input.block) return null;
+  const slots = liveThinkingBlockSlotCount(input.block);
+  const immediate = !input.active || input.reducedMotion || input.blockCount > 1;
+  return {
+    blockKey: input.blockKey,
+    block: input.block,
+    revealedCount: immediate ? slots : Math.min(1, slots),
+    phase: "showing",
+  };
+}
+
+/**
+ * Synchronously reconciles same-block streaming updates (without clearing) and instant
+ * reduced-motion swaps. Returns the same reference when no immediate state change is needed.
+ */
+export function reconcileLiveThinkingDisplay(
+  current: LiveThinkingDisplayState | null,
+  input: {
+    readonly blockKey: string;
+    readonly block: LiveThinkingBlock | undefined;
+    readonly blockCount: number;
+    readonly active: boolean;
+    readonly reducedMotion: boolean;
+  },
+): LiveThinkingDisplayState | null {
+  if (!input.block) return null;
+  const slots = liveThinkingBlockSlotCount(input.block);
+  if (current === null || input.reducedMotion) {
+    if (
+      current !== null &&
+      current.blockKey === input.blockKey &&
+      sameLiveThinkingBlockContent(current.block, input.block) &&
+      current.phase === "showing" &&
+      current.revealedCount === slots
+    ) {
+      return current;
+    }
+    return createInitialLiveThinkingDisplay(input);
+  }
+  if (
+    current.phase === "showing" &&
+    current.blockKey === input.blockKey &&
+    !sameLiveThinkingBlockContent(current.block, input.block)
+  ) {
+    return {
+      ...current,
+      block: input.block,
+      revealedCount: Math.max(Math.min(1, slots), Math.min(current.revealedCount, slots)),
+    };
+  }
+  return current;
+}
+
+export function planLiveThinkingTimer(
+  current: LiveThinkingDisplayState,
+  input: {
+    readonly latestBlockKey: string;
+    readonly active: boolean;
+    readonly elapsedSinceShownMs: number;
+  },
+): LiveThinkingTimerPlan | null {
+  if (current.phase === "clearing") {
+    return { kind: "commit-cleared", delayMs: LIVE_THINKING_CLEAR_MS };
+  }
+  if (current.blockKey !== input.latestBlockKey) {
+    const delayMs = input.active
+      ? Math.max(0, LIVE_THINKING_MIN_DWELL_MS - input.elapsedSinceShownMs)
+      : 0;
+    return { kind: "begin-clear", delayMs };
+  }
+  if (current.revealedCount < liveThinkingBlockSlotCount(current.block)) {
+    return { kind: "reveal-next", delayMs: LIVE_THINKING_LINE_INTERVAL_MS };
+  }
+  return null;
+}
+
+export function applyLiveThinkingTimer(
+  current: LiveThinkingDisplayState | null,
+  kind: LiveThinkingTimerPlan["kind"],
+  latestTarget?: { readonly blockKey: string; readonly block: LiveThinkingBlock | undefined },
+): LiveThinkingDisplayState | null {
+  if (kind === "commit-cleared") {
+    if (!latestTarget?.block) return null;
+    const slots = liveThinkingBlockSlotCount(latestTarget.block);
+    return {
+      blockKey: latestTarget.blockKey,
+      block: latestTarget.block,
+      revealedCount: Math.min(1, slots),
+      phase: "showing",
+    };
+  }
+  if (!current || current.phase !== "showing") return current;
+  if (kind === "begin-clear") {
+    return { ...current, phase: "clearing" };
+  }
+  const nextSlots = liveThinkingBlockSlotCount(current.block);
+  return {
+    ...current,
+    revealedCount: Math.min(nextSlots, current.revealedCount + 1),
+  };
 }
