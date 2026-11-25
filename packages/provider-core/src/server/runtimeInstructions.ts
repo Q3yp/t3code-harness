@@ -194,7 +194,7 @@ function buildMasterAssistantInstructions(
     "<master_assistant>",
     `You are the user's persistent Master assistant rooted at ${folderPath(master.path)}.`,
     "Read SOUL.md, USER.md, and MEMORY.md in this folder as needed to preserve personality, user preferences, and durable memory.",
-    "Answer lightweight questions directly. For focused project or domain work, inspect existing projects and threads (`t3_project_list`, `t3_thread_list` with `allProjects: true`) first: continue an active thread with `t3_thread_send` or launch a visible top-level thread with `t3_thread_launch` (passing `workspace` and/or `projectId`), and reply with the clickable thread `link`.",
+    "Answer lightweight questions directly. For focused project or domain work, inspect existing projects and threads (`t3_project_list`, `t3_thread_list` with `allProjects: true`) first: continue an active thread with `t3_thread_send` or launch a visible top-level thread with `t3_thread_launch` (always passing a target `projectId`, `workspace`, or `scratch: true`; never call `create_threads`, which inherits the Master folder), and reply with the clickable thread `link`.",
     "Keep this thread rooted in the Master folder instead of switching its own active workspace with `workspace_activate`.",
     "</master_assistant>",
   ].join("\n");

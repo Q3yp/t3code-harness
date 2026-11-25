@@ -1214,6 +1214,7 @@ export default function ChatView(props: ChatViewProps) {
       ? draftFallback.selection
       : activeProjectSettings.settings.defaultModelSelection;
   const handleNewThreadInActiveProject = () => {
+    if (activeProject?.isMaster) return;
     const workspace = activeThread?.activeWorkspace ?? draftThread?.activeWorkspace ?? null;
     startNewThreadForProject(
       activeProjectRef,

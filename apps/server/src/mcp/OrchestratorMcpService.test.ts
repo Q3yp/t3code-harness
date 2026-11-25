@@ -69,6 +69,7 @@ import * as ThreadManagementService from "../orchestration-v2/ThreadManagementSe
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import { buildUnavailableProviderSnapshot } from "../provider/unavailableProviderSnapshot.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as MasterAssistantService from "../workspace/MasterAssistantService.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as SecretRequests from "../secrets/SecretRequests.ts";
@@ -2887,6 +2888,40 @@ describe("OrchestratorMcpService provider resolution", () => {
         assert.equal(error.code, "orchestration_error");
         assert.equal(error.message, `${prefix}refused by the orchestrator`);
       }),
+  );
+
+  it.effect("refuses create_threads when called from the singleton Master assistant project", () =>
+    Effect.gen(function* () {
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          getThreadRecords: () => Effect.succeed(parentProjection([])),
+        }),
+        ServerSettings.layerTest(),
+        providerRegistryLayer([]),
+        adapterRegistryLayer([]),
+        Layer.mock(ProjectService.ProjectService)({ getById: () => Effect.succeedNone }),
+        Layer.mock(MasterAssistantService.MasterAssistantService)({
+          isMasterProject: () => Effect.succeed(true),
+        }),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+      const error = yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        return yield* service
+          .createThreads(scope, {
+            threads: [{ prompt: "Start a separate task." }],
+            clientRequestId: "create-threads-master-refusal",
+          })
+          .pipe(Effect.flip);
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+      assert.equal(error.code, "invalid_request");
+      assert.include(error.message, "t3_thread_launch");
+    }),
   );
 
   it.effect("an unadvertised model refusal names advertised slugs to retry with", () =>

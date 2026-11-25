@@ -1509,12 +1509,14 @@ function OpenCommandPaletteDialog(props: {
   const actionItems: Array<CommandPaletteActionItem | CommandPaletteSubmenuItem> = [];
 
   if (projects.length > 0 || agentWorkspaces.length > 0) {
-    const activeProjectTitle =
-      activeThread?.activeWorkspace?.name ??
-      activeDraftThread?.activeWorkspace?.name ??
-      projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
-      currentProject?.title ??
-      null;
+    const activeProjectIsMaster = currentProject?.isMaster === true;
+    const activeProjectTitle = activeProjectIsMaster
+      ? (projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ?? null)
+      : (activeThread?.activeWorkspace?.name ??
+        activeDraftThread?.activeWorkspace?.name ??
+        projectPickerEntries.find((entry) => entry.isPreferred)?.group.displayName ??
+        currentProject?.title ??
+        null);
 
     if (activeProjectTitle) {
       actionItems.push({
@@ -1536,6 +1538,7 @@ function OpenCommandPaletteDialog(props: {
           await startNewThreadFromContext({
             activeDraftThread,
             activeThread: activeThread ?? undefined,
+            activeProjectIsMaster,
             defaultProjectRef,
             handleNewThread,
           });

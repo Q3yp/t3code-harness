@@ -1510,13 +1510,9 @@ const layerDeferredListing = McpServer.visibility(
       const scope = yield* Effect.serviceOption(McpInvocationContext.McpInvocationContext);
       const threadScope = Option.getOrUndefined(scope)?.thread;
       const providerSessionId = threadScope?.providerSessionId;
-      if (headers[MCP_TOOL_EXPOSURE_HEADER] !== "deferred" || providerSessionId === undefined) {
-        return target !== McpToolExposure.TOOL_SEARCH;
-      }
-      if (exposure.isListed(providerSessionId, target)) return true;
-      const isMaster =
+      const checkIsMaster = () =>
         masterAssistant !== undefined && threadManagement !== undefined && threadScope !== undefined
-          ? yield* threadManagement.getThreadShell(threadScope.threadId).pipe(
+          ? threadManagement.getThreadShell(threadScope.threadId).pipe(
               Effect.flatMap((shell) =>
                 shell === null
                   ? Effect.succeed(false)
@@ -1524,8 +1520,15 @@ const layerDeferredListing = McpServer.visibility(
               ),
               Effect.orElseSucceed(() => false),
             )
-          : false;
-      return exposure.isListed(providerSessionId, target, { isMaster });
+          : Effect.succeed(false);
+      if (target === "create_threads" && (yield* checkIsMaster())) {
+        return false;
+      }
+      if (headers[MCP_TOOL_EXPOSURE_HEADER] !== "deferred" || providerSessionId === undefined) {
+        return target !== McpToolExposure.TOOL_SEARCH;
+      }
+      if (exposure.isListed(providerSessionId, target)) return true;
+      return exposure.isListed(providerSessionId, target, { isMaster: yield* checkIsMaster() });
     });
   }),
   { global: true },

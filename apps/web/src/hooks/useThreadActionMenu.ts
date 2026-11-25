@@ -137,11 +137,16 @@ export function useThreadActionMenu(input: {
         titleRegeneration: configLoaded,
       };
       const isRegeneratingTitle = thread.titleRegeneration != null;
+      const threadProject = projects.find(
+        (candidate) =>
+          candidate.environmentId === threadRef.environmentId && candidate.id === thread.projectId,
+      );
+      const isMasterThreadProject = threadProject?.isMaster === true;
       const snoozePresets = resolveSnoozePresets(now, timestampFormat, threadRef.environmentId);
       const items = buildThreadActionMenuItems({
         canOperate: readEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope),
         canFind: onFind !== undefined,
-        branch: thread.branch ?? null,
+        branch: isMasterThreadProject ? null : (thread.branch ?? null),
         projectFilter: null,
         isPinned: thread.pinnedAt != null,
         isSettled: supports.settlement && thread.settledOverride === "settled",

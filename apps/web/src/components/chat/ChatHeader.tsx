@@ -268,35 +268,47 @@ export const ChatHeader = memo(function ChatHeader({
         {activeWorkspace || activeProject ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <button
-                      type="button"
-                      aria-label={gt("New thread in {project}", { project: breadcrumbRootLabel })}
-                      onClick={onNewThreadInProject}
-                      className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                    />
-                  }
-                >
-                  {activeWorkspace ? (
-                    <LayersIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
-                  ) : activeProject ? (
-                    <ProjectFavicon project={activeProject} className="size-3.5" />
-                  ) : null}
+              {!activeWorkspace && activeProject?.isMaster ? (
+                <span className="inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-sm text-muted-foreground">
+                  <ProjectFavicon project={activeProject} className="size-3.5" />
                   <MiddleTruncate
                     data-slot="workspace-breadcrumb-text"
                     value={breadcrumbRootLabel ?? ""}
                     showTitle={false}
                     variant="cap-aligned"
                   />
-                </TooltipTrigger>
-                <TooltipPopup side="top">
-                  <T>
-                    New thread in <Var>{breadcrumbRootLabel}</Var>
-                  </T>
-                </TooltipPopup>
-              </Tooltip>
+                </span>
+              ) : (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <button
+                        type="button"
+                        aria-label={gt("New thread in {project}", { project: breadcrumbRootLabel })}
+                        onClick={onNewThreadInProject}
+                        className="inline-flex min-w-0 max-w-full cursor-pointer items-center gap-1.5 rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+                      />
+                    }
+                  >
+                    {activeWorkspace ? (
+                      <LayersIcon className="size-3.5 shrink-0 text-primary" aria-hidden />
+                    ) : activeProject ? (
+                      <ProjectFavicon project={activeProject} className="size-3.5" />
+                    ) : null}
+                    <MiddleTruncate
+                      data-slot="workspace-breadcrumb-text"
+                      value={breadcrumbRootLabel ?? ""}
+                      showTitle={false}
+                      variant="cap-aligned"
+                    />
+                  </TooltipTrigger>
+                  <TooltipPopup side="top">
+                    <T>
+                      New thread in <Var>{breadcrumbRootLabel}</Var>
+                    </T>
+                  </TooltipPopup>
+                </Tooltip>
+              )}
             </WorkspaceBreadcrumbItem>
             <WorkspaceBreadcrumbSeparator>
               <WorkspaceBreadcrumbText>/</WorkspaceBreadcrumbText>

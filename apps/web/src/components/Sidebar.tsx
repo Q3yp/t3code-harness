@@ -1094,6 +1094,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     masterWorkspaceRoot,
     masterProjectKeys,
     masterThread,
+    masterThreadKey,
     isOpening: isOpeningMaster,
     openMaster,
   } = useMasterAssistant();
@@ -1243,11 +1244,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             : thread,
         );
   const nonMasterListedThreads =
-    masterProjectKeys.size === 0
+    masterThreadKey === null
       ? listedThreads
-      : listedThreads.filter(
-          (thread) => !masterProjectKeys.has(`${thread.environmentId}:${thread.projectId}`),
-        );
+      : listedThreads.filter((thread) => threadShellKey(thread) !== masterThreadKey);
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -3211,10 +3210,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       )
     ) {
       if (isMobile) setOpenMobile(false);
+      const viewedContext = newThreadContext.activeThread ?? newThreadContext.activeDraftThread;
+      const activeProjectIsMaster =
+        viewedContext != null &&
+        masterProjectKeys.has(`${viewedContext.environmentId}:${viewedContext.projectId}`);
       // With no current or open project, such as when every project is archived, pick one.
       void startNewThreadFromContext({
         activeDraftThread: newThreadContext.activeDraftThread,
         activeThread: newThreadContext.activeThread ?? undefined,
+        activeProjectIsMaster,
         defaultProjectRef: newThreadContext.defaultProjectRef,
         handleNewThread,
       }).then((started) => {
@@ -3520,10 +3524,10 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             />
             {masterEnvironmentId !== null
               ? (() => {
-                  const masterThreadKey = masterThread ? threadShellKey(masterThread) : null;
                   const isMasterRouteActive =
                     (masterThreadKey !== null && routeRowThreadKey === masterThreadKey) ||
-                    (routeDraftThread !== null &&
+                    (masterThreadKey === null &&
+                      routeDraftThread !== null &&
                       masterProjectKeys.has(
                         `${routeDraftThread.environmentId}:${routeDraftThread.projectId}`,
                       ));
@@ -3563,11 +3567,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                                 )}
                                 aria-hidden
                               />
-                              <span className="min-w-0 flex-1 truncate">
-                                {masterThread?.title && masterThread.title !== "New thread"
-                                  ? masterThread.title
-                                  : gt("Master")}
-                              </span>
+                              <span className="min-w-0 flex-1 truncate">{gt("Master")}</span>
                               {masterWorking ? (
                                 <span className="shrink-0 text-2xs text-primary">
                                   <T>Working</T>

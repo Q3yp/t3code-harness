@@ -43,6 +43,7 @@ import {
   hasExplicitComposerModelSelection,
   resolveNewDraftStartFromOrigin,
   resolveNewThreadModelSelectionOverride,
+  selectCanonicalMasterThread,
   threadHasStarted,
 } from "../lib/chatThreadActions";
 import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
@@ -50,7 +51,7 @@ import { peekT3ProjectFile, readT3ProjectFile } from "../lib/t3ProjectFileDefaul
 import { appAtomRegistry } from "../rpc/atomRegistry";
 import { environmentSummaries } from "../state/presentation";
 import { environmentServerConfigsAtom } from "../state/server";
-import { resolveThreadRouteTarget } from "../threadRoutes";
+import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from "../uiStateStore";
 import { getClientSettings, useClientSettings } from "./useSettings";
 import { getLocalStorageItem, useLocalStorage } from "./useLocalStorage";
@@ -204,6 +205,20 @@ export function createNewThreadHandler(router: AnyRouter) {
         candidate.id === projectRef.projectId &&
         candidate.environmentId === projectRef.environmentId,
     );
+    if (project?.isMaster === true) {
+      const existingMasterThread = selectCanonicalMasterThread(readThreadShells(), project);
+      if (existingMasterThread !== null) {
+        return router
+          .navigate({
+            to: "/$environmentId/$threadId",
+            params: buildThreadRouteParams(
+              scopeThreadRef(existingMasterThread.environmentId, existingMasterThread.id),
+            ),
+            replace: options?.replace ?? false,
+          })
+          .then(() => null);
+      }
+    }
     const projectSettings = resolveProjectSettings(
       targetServerSettings,
       project?.id ?? null,
@@ -498,11 +513,14 @@ export function resolveDefaultProjectRef(
   const lastUsed = projects.find(
     (project) =>
       project.archivedAt == null &&
+      project.isMaster !== true &&
       scopedProjectKey(scopeProjectRef(project.environmentId, project.id)) === lastUsedProjectKey,
   );
   if (lastUsed) return scopeProjectRef(lastUsed.environmentId, lastUsed.id);
   if (!fallbackReady) return null;
-  const liveProjects = projects.filter((project) => project.archivedAt == null);
+  const liveProjects = projects.filter(
+    (project) => project.archivedAt == null && project.isMaster !== true,
+  );
   const [firstProject] = orderItemsByPreferredIds({
     items: liveProjects,
     preferredIds: projectOrder,

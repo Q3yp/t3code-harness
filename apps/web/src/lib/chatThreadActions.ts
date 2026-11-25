@@ -1,13 +1,67 @@
 import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import type {
-  EnvironmentId,
-  ModelSelection,
-  ProjectId,
-  ScopedProjectRef,
-  ThreadActiveWorkspace,
+  EnvironmentProject,
+  EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/shell";
+import {
+  isListedThreadLineage,
+  type EnvironmentId,
+  type ModelSelection,
+  type ProjectId,
+  type ScopedProjectRef,
+  type ThreadActiveWorkspace,
 } from "@t3tools/contracts";
 import type { ComposerThreadDraftState, DraftThreadEnvMode } from "../composerDraftStore";
+
+function threadCreatedMs(thread: Pick<EnvironmentThreadShell, "createdAt" | "updatedAt">): number {
+  const created = Date.parse(thread.createdAt);
+  if (Number.isFinite(created)) return created;
+  const updated = Date.parse(thread.updatedAt);
+  return Number.isFinite(updated) ? updated : Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Picks the single canonical Master thread for a Master project: prefers user-created
+ * threads over MCP-spawned threads and selects the oldest created thread so an accidental
+ * newer thread in the Master project can never hijack the Master slot.
+ */
+export function selectCanonicalMasterThread<
+  T extends Pick<
+    EnvironmentThreadShell,
+    | "environmentId"
+    | "id"
+    | "projectId"
+    | "createdAt"
+    | "updatedAt"
+    | "deletedAt"
+    | "archivedAt"
+    | "lineage"
+  >,
+>(
+  threads: ReadonlyArray<T>,
+  masterProject: Pick<EnvironmentProject, "environmentId" | "id"> | null,
+): T | null {
+  if (masterProject === null) return null;
+  const candidates = threads.filter(
+    (thread) =>
+      thread.environmentId === masterProject.environmentId &&
+      thread.projectId === masterProject.id &&
+      thread.deletedAt === null &&
+      thread.archivedAt === null &&
+      isListedThreadLineage(thread.lineage),
+  );
+  if (candidates.length === 0) return null;
+  return (
+    candidates.toSorted((left, right) => {
+      const leftMcp = left.id.startsWith("thread:mcp:") ? 1 : 0;
+      const rightMcp = right.id.startsWith("thread:mcp:") ? 1 : 0;
+      if (leftMcp !== rightMcp) return leftMcp - rightMcp;
+      const createdDiff = threadCreatedMs(left) - threadCreatedMs(right);
+      if (createdDiff !== 0) return createdDiff;
+      return left.id.localeCompare(right.id);
+    })[0] ?? null
+  );
+}
 
 type ComposerModelSelectionState = Pick<
   ComposerThreadDraftState,
@@ -36,6 +90,8 @@ interface NewThreadHandler {
 export interface ChatThreadActionContext {
   readonly activeDraftThread: ThreadContextLike | null;
   readonly activeThread: ThreadContextLike | undefined;
+  /** Master is a singleton assistant thread; new-thread shortcuts fall back to a normal project. */
+  readonly activeProjectIsMaster?: boolean | undefined;
   readonly defaultProjectRef: ScopedProjectRef | null;
   readonly handleNewThread: NewThreadHandler;
 }
@@ -92,14 +148,16 @@ export function draftModelSelectionApplies(
 export function resolveThreadActionProjectRef(
   context: ChatThreadActionContext,
 ): ScopedProjectRef | null {
-  if (context.activeThread) {
-    return scopeProjectRef(context.activeThread.environmentId, context.activeThread.projectId);
-  }
-  if (context.activeDraftThread) {
-    return scopeProjectRef(
-      context.activeDraftThread.environmentId,
-      context.activeDraftThread.projectId,
-    );
+  if (!context.activeProjectIsMaster) {
+    if (context.activeThread) {
+      return scopeProjectRef(context.activeThread.environmentId, context.activeThread.projectId);
+    }
+    if (context.activeDraftThread) {
+      return scopeProjectRef(
+        context.activeDraftThread.environmentId,
+        context.activeDraftThread.projectId,
+      );
+    }
   }
   return context.defaultProjectRef;
 }
@@ -112,11 +170,13 @@ export async function startNewThreadFromContext(
     return false;
   }
 
-  const activeWorkspace = context.activeThread
-    ? (context.activeThread.activeWorkspace ?? null)
-    : context.activeDraftThread
-      ? (context.activeDraftThread.activeWorkspace ?? null)
-      : null;
+  const activeWorkspace = context.activeProjectIsMaster
+    ? null
+    : context.activeThread
+      ? (context.activeThread.activeWorkspace ?? null)
+      : context.activeDraftThread
+        ? (context.activeDraftThread.activeWorkspace ?? null)
+        : null;
   await (activeWorkspace
     ? context.handleNewThread(projectRef, { activeWorkspace })
     : context.handleNewThread(projectRef));

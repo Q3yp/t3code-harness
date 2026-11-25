@@ -119,6 +119,7 @@ import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import { isSnoozed } from "../orchestration-v2/ThreadSettlementService.ts";
 import { userFacingDispatchErrorMessage } from "../orchestration-v2/UserFacingErrors.ts";
 import * as ProjectService from "../project/ProjectService.ts";
+import * as MasterAssistantService from "../workspace/MasterAssistantService.ts";
 import * as ProviderRegistry from "../provider/ProviderRegistry.ts";
 import * as ScheduledTaskService from "../scheduledTasks/ScheduledTaskService.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -1340,6 +1341,9 @@ const make = Effect.gen(function* () {
   const gitDriver = yield* GitVcsDriver.GitVcsDriver;
   const serverSettings = yield* ServerSettings.ServerSettingsService;
   const remoteDelegation = yield* RemoteDelegation.RemoteDelegation;
+  const masterAssistant = Option.getOrUndefined(
+    yield* Effect.serviceOption(MasterAssistantService.MasterAssistantService),
+  );
 
   const requireProject = (projectId: ProjectId) =>
     projects.getById(projectId).pipe(
@@ -3252,6 +3256,15 @@ const make = Effect.gen(function* () {
     createThreads: Effect.fn("OrchestratorMcpService.createThreads")(
       function* (callerScope, input) {
         const { scope, parent } = yield* loadThreadCaller(callerScope, "create_threads");
+        if (
+          masterAssistant !== undefined &&
+          (yield* masterAssistant.isMasterProject(parent.thread.projectId))
+        ) {
+          return yield* failure(
+            "invalid_request",
+            "Master is a singleton assistant thread and cannot host additional threads. Use t3_thread_launch with a target projectId (from t3_project_list or t3_project_create), an Agent Workspace name via workspace, or scratch: true instead.",
+          );
+        }
         const parentRun = ThreadManagementService.latestActiveRun(parent);
         if (
           parentRun === undefined ||

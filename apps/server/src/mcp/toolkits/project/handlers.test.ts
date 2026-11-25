@@ -40,6 +40,7 @@ import * as Project from "../../../project/ProjectService.ts";
 import * as ProjectCloneTracker from "../../../project/ProjectCloneTracker.ts";
 import * as ManagedProjectFolders from "../../../project/ManagedProjectFolders.ts";
 import * as AgentWorkspaceService from "../../../workspace/AgentWorkspaceService.ts";
+import * as MasterAssistantService from "../../../workspace/MasterAssistantService.ts";
 import * as PeerForwarding from "../../../peer/PeerForwarding.ts";
 import * as SourceControlProviderRegistry from "../../../sourceControl/SourceControlProviderRegistry.ts";
 import * as Repositories from "../../../sourceControl/SourceControlRepositoryService.ts";
@@ -1359,4 +1360,37 @@ it.effect(
         path: "/workspaces/writing",
       });
     }),
+);
+
+it.effect("t3_thread_launch refuses to create additional threads in the Master project", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const masterProjectId = ProjectId.make("project:master");
+    const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched });
+    const dependencies = Layer.merge(
+      harness.dependencies,
+      Layer.mock(MasterAssistantService.MasterAssistantService)({
+        isMasterProject: (id) => Effect.succeed(id === masterProjectId),
+      }),
+    );
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+
+    const refused = yield* toolkit
+      .handle("t3_thread_launch", {
+        title: "Accidental nested thread",
+        projectId: masterProjectId,
+        message: "Should be rejected.",
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+    expect(launched).toHaveLength(0);
+    expect(refused.at(-1)?.result).toMatchObject({
+      code: "invalid_request",
+      message: expect.stringMatching(/Master/i),
+    });
+  }),
 );

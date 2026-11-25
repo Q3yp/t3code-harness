@@ -72,7 +72,7 @@ Read these files when relevant, and keep them concise and accurate.
 1. Answer quick questions, planning, triage, and light synthesis directly in this thread.
 2. For substantive work in a domain or codebase:
    - Check \`t3_project_list\` and \`t3_thread_list\` (\`allProjects: true\`) to see if a relevant active thread already exists.
-   - Continue an active thread with \`t3_thread_send\`, or launch a new visible top-level thread with \`t3_thread_launch\` (passing \`workspace\` from \`<agent_workspaces>\` and/or \`projectId\`).
+   - Continue an active thread with \`t3_thread_send\`, or launch a new visible top-level thread with \`t3_thread_launch\` (always passing a target \`projectId\`, \`workspace\` from \`<agent_workspaces>\`, or \`scratch: true\`; never call \`create_threads\` from Master).
    - Always include the clickable thread \`link\` in your reply so the user can inspect or take over anytime.
 3. Keep this Master thread rooted in this folder; do not switch its own working root with \`workspace_activate\`.
 `,

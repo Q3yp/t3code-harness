@@ -83,11 +83,22 @@ export function installChatRouteCommands(router: AnyRouter): () => void {
         ? drafts.getDraftThread(target.threadRef)
         : drafts.getDraftSession(target.draftId)
       : null;
+    const projects = readProjects();
+    const activeContext = activeThread ?? activeDraftThread;
+    const activeProjectIsMaster =
+      activeContext != null &&
+      projects.some(
+        (project) =>
+          project.environmentId === activeContext.environmentId &&
+          project.id === activeContext.projectId &&
+          project.isMaster === true,
+      );
     return {
       activeDraftThread,
       activeThread: activeThread ?? undefined,
+      activeProjectIsMaster,
       defaultProjectRef: resolveDefaultProjectRef(
-        readProjects(),
+        projects,
         useUiStateStore.getState().projectOrder,
         lastUsedProjectKey,
         appAtomRegistry.get(defaultProjectFallbackReadyAtom(lastUsedProjectKey)),

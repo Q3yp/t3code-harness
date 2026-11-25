@@ -1,5 +1,9 @@
 import { RegistryContext } from "@effect/atom-react";
-import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopeProjectRef,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
 import { thrownErrorMessage } from "@t3tools/client-runtime/errors";
 import { availableMasterWorkspaceRoot } from "@t3tools/client-runtime/operations/projects";
 import { isMasterProject } from "@t3tools/client-runtime/state/projects";
@@ -12,25 +16,19 @@ import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
-import { isListedThreadLineage, type EnvironmentId } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 import { useRouter } from "@tanstack/react-router";
 import { msg } from "gt-react";
 import { useContext, useState } from "react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { m } from "~/i18n/messages";
+import { selectCanonicalMasterThread } from "~/lib/chatThreadActions";
 import { useProjects, useQuietThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { projectEnvironment } from "~/state/projects";
 import { buildThreadRouteParams } from "~/threadRoutes";
 import { useNewThreadHandler } from "./useHandleNewThread";
-
-function threadUpdatedMs(thread: Pick<EnvironmentThreadShell, "updatedAt" | "createdAt">): number {
-  const updated = Date.parse(thread.updatedAt);
-  if (Number.isFinite(updated)) return updated;
-  const created = Date.parse(thread.createdAt);
-  return Number.isFinite(created) ? created : 0;
-}
 
 export function useMasterAssistant() {
   const { environments } = useEnvironments();
@@ -72,19 +70,14 @@ export function useMasterAssistant() {
     }
   }
 
-  const masterThread: EnvironmentThreadShell | null =
-    masterProject === null
+  const masterThread: EnvironmentThreadShell | null = selectCanonicalMasterThread(
+    threads,
+    masterProject,
+  );
+  const masterThreadKey: string | null =
+    masterThread === null
       ? null
-      : (threads
-          .filter(
-            (thread) =>
-              thread.environmentId === masterProject.environmentId &&
-              thread.projectId === masterProject.id &&
-              thread.deletedAt === null &&
-              thread.archivedAt === null &&
-              isListedThreadLineage(thread.lineage),
-          )
-          .toSorted((left, right) => threadUpdatedMs(right) - threadUpdatedMs(left))[0] ?? null);
+      : scopedThreadKey(scopeThreadRef(masterThread.environmentId, masterThread.id));
 
   const openMaster = async (): Promise<void> => {
     if (masterEnvironmentId === null || isOpening) return;
@@ -137,6 +130,7 @@ export function useMasterAssistant() {
     masterProject,
     masterProjectKeys,
     masterThread,
+    masterThreadKey,
     isOpening,
     openMaster,
   };

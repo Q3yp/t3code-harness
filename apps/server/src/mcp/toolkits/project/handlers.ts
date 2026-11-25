@@ -329,6 +329,16 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
                   ),
                 )
               : yield* resolveProjectId(context, input.projectId);
+        const masterAssistant = Option.getOrUndefined(
+          yield* Effect.serviceOption(MasterAssistantService.MasterAssistantService),
+        );
+        if (masterAssistant !== undefined && (yield* masterAssistant.isMasterProject(projectId))) {
+          return yield* new OrchestratorMcpFailure({
+            code: "invalid_request",
+            message:
+              "Master is a singleton assistant thread and cannot host additional threads. Pass a target projectId (from t3_project_list or t3_project_create), an Agent Workspace name via workspace, or scratch: true.",
+          });
+        }
         // A retry of an accepted launch replays it: it keeps the model it started
         // with and skips the checks only a new launch needs, which the project
         // may no longer pass, such as a base branch deleted since.

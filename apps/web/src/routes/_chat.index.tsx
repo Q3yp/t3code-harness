@@ -47,7 +47,7 @@ function IndexDraftLanding() {
 
   const mostRecentProject =
     sortScopedProjectsForSidebar(
-      projects.filter((project) => project.archivedAt == null),
+      projects.filter((project) => project.archivedAt == null && project.isMaster !== true),
       threads,
       "updated_at",
     )[0] ?? null;

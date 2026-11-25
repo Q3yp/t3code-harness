@@ -20,6 +20,7 @@ const MASTER_DIRECT_TOOLS: ReadonlySet<string> = new Set([
   "t3_thread_read",
   "t3_thread_send",
   "t3_project_list",
+  "t3_project_create",
   "schedule_task",
   "list_scheduled_tasks",
   "delete_scheduled_task",
