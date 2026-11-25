@@ -861,24 +861,27 @@ function HighlightedCodeText({
   readonly code: string;
   readonly lines: HighlightedLines | null;
 }) {
-  let offset = 0;
-  const highlighted = lines?.flatMap((line, lineIndex) => {
-    const separator = lineIndex > 0 ? "\n" : "";
-    offset += separator.length;
-    return [
-      separator,
-      ...line.map((token) => {
+  let highlighted: Array<string | ReactNode> | undefined;
+  if (lines !== null) {
+    highlighted = [];
+    let offset = 0;
+    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+      const line = lines[lineIndex]!;
+      const separator = lineIndex > 0 ? "\n" : "";
+      offset += separator.length;
+      highlighted.push(separator);
+      for (const token of line) {
         const start = offset;
         offset += token.content.length;
         // Plain RN Text inherits the mono font; AppText would reset it to sans.
-        return (
+        highlighted.push(
           <RNText key={start} style={token.color ? { color: token.color } : undefined}>
             {token.content}
-          </RNText>
+          </RNText>,
         );
-      }),
-    ];
-  });
+      }
+    }
+  }
   return (
     <Text selectable className="font-mono text-2xs leading-normal text-foreground">
       {highlighted ?? code}
