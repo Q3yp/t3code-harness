@@ -19,7 +19,9 @@ import {
 import {
   applyLiveThinkingTimer,
   createInitialLiveThinkingDisplay,
+  isLiveThinkingBlockReady,
   liveThinkingBlocks,
+  liveThinkingBlockSlotCount,
   planLiveThinkingTimer,
   reconcileLiveThinkingDisplay,
 } from "@t3tools/client-runtime/work-log/presentation";
@@ -1443,10 +1445,9 @@ function MobileLiveThinkingLine(props: {
     <NativeAnimated.View style={{ opacity, transform: [{ translateY }] }}>
       <Text
         selectable={false}
-        numberOfLines={props.heading ? 1 : 2}
-        ellipsizeMode="tail"
+        {...(props.heading ? { numberOfLines: 1, ellipsizeMode: "tail" as const } : {})}
         className={
-          props.heading ? "text-sm font-medium text-foreground" : "text-sm text-foreground-muted"
+          props.heading ? "text-sm font-semibold text-foreground" : "text-sm text-foreground"
         }
       >
         {props.text}
@@ -1456,7 +1457,7 @@ function MobileLiveThinkingLine(props: {
 }
 
 function MobileLiveThinkingStream(props: {
-  readonly thoughtId: string;
+  readonly scopeKey: string;
   readonly text: string;
   readonly active: boolean;
 }) {
@@ -1467,11 +1468,14 @@ function MobileLiveThinkingStream(props: {
     [props.text],
   );
   const latestBlock = blocks.at(-1);
-  const latestBlockKey = latestBlock ? `${props.thoughtId}:${latestBlock.key}` : "";
+  const latestBlockKey = latestBlock ? `${props.scopeKey}:${latestBlock.key}` : "";
   const containerOpacity = useAnimatedValue(1);
   const shownAtRef = useRef<{ blockKey: string; time: number } | null>(null);
+  const latestBlockSeenRef = useRef<{ blockKey: string; time: number } | null>(null);
+  const clearingStartedAtRef = useRef<{ blockKey: string; time: number } | null>(null);
 
   const targetInput = {
+    scopeKey: props.scopeKey,
     blockKey: latestBlockKey,
     block: latestBlock,
     blockCount: blocks.length,
@@ -1482,8 +1486,10 @@ function MobileLiveThinkingStream(props: {
   const [display, setDisplay] = useState(() => createInitialLiveThinkingDisplay(targetInput));
 
   const readLatestTarget = useEffectEvent(() => ({
+    scopeKey: props.scopeKey,
     blockKey: latestBlockKey,
     block: latestBlock,
+    active: props.active,
   }));
 
   const reconciled = reconcileLiveThinkingDisplay(display, targetInput);
@@ -1491,13 +1497,28 @@ function MobileLiveThinkingStream(props: {
     setDisplay(reconciled);
   }
 
+  const totalSlots = reconciled ? liveThinkingBlockSlotCount(reconciled.block) : 0;
+  const displayScopeKey = reconciled?.scopeKey ?? "";
+  const displayBlockKey = reconciled?.blockKey ?? "";
+  const displayPhase = reconciled?.phase ?? null;
+  const displayRevealedCount = reconciled?.revealedCount ?? 0;
+  const hasUnrevealedSlots = reconciled !== null && reconciled.revealedCount < totalSlots;
+  const pendingBlockKey =
+    reconciled !== null && reconciled.phase === "showing" && reconciled.blockKey !== latestBlockKey
+      ? latestBlockKey
+      : "";
+  const pendingBlockReady =
+    pendingBlockKey !== "" && latestBlock !== undefined
+      ? isLiveThinkingBlockReady(latestBlock)
+      : true;
+
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives imperative native opacity clear transition between replaced blocks
   useEffect(() => {
     if (reduceMotion) {
       containerOpacity.setValue(1);
       return;
     }
-    if (reconciled?.phase === "clearing") {
+    if (displayPhase === "clearing") {
       const fade = NativeAnimated.timing(containerOpacity, {
         toValue: 0,
         duration: 150,
@@ -1507,40 +1528,111 @@ function MobileLiveThinkingStream(props: {
       return () => fade.stop();
     }
     containerOpacity.setValue(1);
-  }, [reconciled?.phase, containerOpacity, reduceMotion]);
+  }, [displayPhase, containerOpacity, reduceMotion]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- drives timed line-by-line reveal and block replacement
   useEffect(() => {
-    if (!reconciled || !latestBlock || reduceMotion || !appActive) return;
-    if (shownAtRef.current?.blockKey !== reconciled.blockKey) {
-      shownAtRef.current = { blockKey: reconciled.blockKey, time: Date.now() };
+    if (!displayScopeKey || !displayBlockKey || !displayPhase || reduceMotion || !appActive) {
+      return;
     }
-    const plan = planLiveThinkingTimer(reconciled, {
-      latestBlockKey,
-      active: props.active,
-      elapsedSinceShownMs: Date.now() - shownAtRef.current.time,
-    });
+    const now = Date.now();
+    if (shownAtRef.current?.blockKey !== displayBlockKey) {
+      shownAtRef.current = { blockKey: displayBlockKey, time: now };
+    }
+    if (pendingBlockKey) {
+      if (latestBlockSeenRef.current?.blockKey !== pendingBlockKey) {
+        latestBlockSeenRef.current = { blockKey: pendingBlockKey, time: now };
+      }
+    } else {
+      latestBlockSeenRef.current = null;
+    }
+    if (displayPhase === "clearing") {
+      if (clearingStartedAtRef.current?.blockKey !== displayBlockKey) {
+        clearingStartedAtRef.current = { blockKey: displayBlockKey, time: now };
+      }
+    } else {
+      clearingStartedAtRef.current = null;
+    }
+    const plan = planLiveThinkingTimer(
+      {
+        blockKey: displayBlockKey,
+        phase: displayPhase,
+        hasUnrevealedSlots,
+      },
+      {
+        latestBlockKey: pendingBlockKey || displayBlockKey,
+        latestBlockReady: pendingBlockReady,
+        active: props.active,
+        elapsedSinceShownMs: now - shownAtRef.current.time,
+        elapsedSinceLatestBlockMs: latestBlockSeenRef.current
+          ? now - latestBlockSeenRef.current.time
+          : 0,
+        elapsedSinceClearingMs: clearingStartedAtRef.current
+          ? now - clearingStartedAtRef.current.time
+          : 0,
+      },
+    );
     if (!plan) return;
     const timer = setTimeout(() => {
       if (plan.kind === "commit-cleared") {
         const target = readLatestTarget();
+        if (target.scopeKey !== displayScopeKey) return;
         shownAtRef.current = target.block ? { blockKey: target.blockKey, time: Date.now() } : null;
-        setDisplay((current) => applyLiveThinkingTimer(current, plan.kind, target));
+        clearingStartedAtRef.current = null;
+        setDisplay((current) =>
+          current && current.scopeKey !== displayScopeKey
+            ? current
+            : applyLiveThinkingTimer(current, plan.kind, target),
+        );
         return;
       }
-      setDisplay((current) => applyLiveThinkingTimer(current, plan.kind));
+      if (plan.kind === "begin-clear") {
+        clearingStartedAtRef.current = { blockKey: displayBlockKey, time: Date.now() };
+        setDisplay((current) =>
+          current && current.scopeKey === displayScopeKey
+            ? applyLiveThinkingTimer(current, plan.kind)
+            : current,
+        );
+        return;
+      }
+      setDisplay((current) =>
+        current &&
+        current.scopeKey === displayScopeKey &&
+        current.revealedCount === displayRevealedCount
+          ? applyLiveThinkingTimer(current, plan.kind)
+          : current,
+      );
     }, plan.delayMs);
     return () => clearTimeout(timer);
-  }, [reconciled, latestBlock, latestBlockKey, props.active, reduceMotion, appActive]);
+  }, [
+    displayScopeKey,
+    displayBlockKey,
+    displayPhase,
+    displayRevealedCount,
+    hasUnrevealedSlots,
+    pendingBlockKey,
+    pendingBlockReady,
+    props.active,
+    reduceMotion,
+    appActive,
+  ]);
 
   if (!reconciled) return null;
   const hasHeading = reconciled.block.heading !== null;
   const showHeading = hasHeading && reconciled.revealedCount > 0;
   const visibleBodyLineCount = Math.max(0, reconciled.revealedCount - (hasHeading ? 1 : 0));
   const visibleBodyLines = reconciled.block.lines.slice(0, visibleBodyLineCount);
+  const isSettled =
+    !props.active &&
+    reconciled.phase === "showing" &&
+    reconciled.blockKey === latestBlockKey &&
+    reconciled.revealedCount >= totalSlots;
 
   return (
-    <View style={{ height: 92, overflow: "hidden" }} className="min-w-0 flex-1 py-0.5">
+    <View
+      style={{ ...(isSettled ? { maxHeight: 96 } : { height: 96 }), overflow: "hidden" }}
+      className="min-w-0 flex-1 py-0.5"
+    >
       <NativeAnimated.View key={reconciled.blockKey} style={{ opacity: containerOpacity, gap: 2 }}>
         {showHeading && reconciled.block.heading ? (
           <MobileLiveThinkingLine
@@ -1564,6 +1656,7 @@ function MobileLiveThinkingStream(props: {
 
 export function ThreadWorkGroupToggle(props: {
   readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly rowSizing: ReturnType<typeof deriveThreadWorkLogSizing>;
   readonly expanded: boolean;
   readonly hiddenCount: number;
@@ -1592,24 +1685,35 @@ export function ThreadWorkGroupToggle(props: {
       ? workRowSymbolName(props.toolSurface)
       : toolGroupSummarySymbolName(props.summaryKind));
 
+  const streamBelowToggle = props.thoughtStream !== undefined && props.summaryKind === "reasoning";
+  const thoughtScopeKey = props.thoughtStream
+    ? `${props.environmentId}:${props.threadId}:${props.thoughtStream.id}`
+    : "";
+
   return (
     <WorkLogBlock layout="group-header">
-      {props.thoughtStream ? (
+      {props.thoughtStream && !streamBelowToggle ? (
         <Pressable
           accessible={false}
           onPress={props.onToggle}
-          className="flex-row items-start gap-1.5 rounded-md px-0.5 active:bg-subtle"
+          className="rounded-md px-0.5 active:bg-subtle"
         >
-          <WorkLogIconSlot>
-            <WorkLogIcon icon="brain" color={props.iconSubtleColor} />
-          </WorkLogIconSlot>
-          <MobileLiveThinkingStream
-            thoughtId={props.thoughtStream.id}
-            text={props.thoughtStream.text}
-            active={props.shimmer}
-          />
+          <View className="flex-row items-center gap-1.5">
+            <WorkLogIconSlot>
+              <WorkLogIcon icon="brain" color={props.iconSubtleColor} />
+            </WorkLogIconSlot>
+            <WorkLogLabel>{gt("Thought")}</WorkLogLabel>
+          </View>
+          <View className="ml-7">
+            <MobileLiveThinkingStream
+              key={thoughtScopeKey}
+              scopeKey={thoughtScopeKey}
+              text={props.thoughtStream.text}
+              active={false}
+            />
+          </View>
         </Pressable>
-      ) : props.thought ? (
+      ) : !props.thoughtStream && props.thought ? (
         <Pressable
           accessible={false}
           onPress={props.onToggle}
@@ -1685,6 +1789,20 @@ export function ThreadWorkGroupToggle(props: {
         </View>
         {props.trailing}
       </View>
+      {props.thoughtStream && streamBelowToggle ? (
+        <Pressable
+          accessible={false}
+          onPress={props.onToggle}
+          className="ml-7 rounded-md px-0.5 active:bg-subtle"
+        >
+          <MobileLiveThinkingStream
+            key={thoughtScopeKey}
+            scopeKey={thoughtScopeKey}
+            text={props.thoughtStream.text}
+            active={props.shimmer}
+          />
+        </Pressable>
+      ) : null}
     </WorkLogBlock>
   );
 }

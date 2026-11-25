@@ -6,6 +6,7 @@ import * as DateTime from "effect/DateTime";
 import {
   applyLiveThinkingTimer,
   createInitialLiveThinkingDisplay,
+  LIVE_THINKING_BUFFER_MS,
   LIVE_THINKING_CLEAR_MS,
   LIVE_THINKING_LINE_INTERVAL_MS,
   LIVE_THINKING_MIN_DWELL_MS,
@@ -275,19 +276,75 @@ describe("liveThinkingBlocks", () => {
     ]);
   });
 
+  it("keeps complete sentences intact across block boundaries without orphaned fragments or streaming block jumps", () => {
+    const s1 = "The import cycle appears to be the root cause.";
+    const s2 =
+      "`ProjectService.ts` relies on `KnownWorkspaces.ts`, which in turn depends on `MasterAssistantService.ts`, creating a circular dependency.";
+    const s3Prefix = "The problematic line within `ProjectService` suggests premature evaluation";
+    const s3Full = `${s3Prefix} during initialization.`;
+    const s4 =
+      "The lazy loading in the `Effect.gen` function provides a clue for mitigating the top-level-evaluation issue.";
+
+    const midStream = liveThinkingBlocks(`${s1} ${s2} ${s3Prefix}`);
+    const afterS3 = liveThinkingBlocks(`${s1} ${s2} ${s3Full}`);
+    const full = liveThinkingBlocks(`${s1} ${s2} ${s3Full} ${s4}`);
+
+    // While sentence 3 streams past a single visual line, it stays in block 0 instead of jumping.
+    expect(midStream).toHaveLength(1);
+    expect(afterS3).toHaveLength(1);
+    expect(afterS3[0]?.lines.at(-1)?.text).toBe(
+      "The problematic line within ProjectService suggests premature evaluation during initialization.",
+    );
+
+    // Sentence 4 opens block 1 cleanly with no orphaned trailing word from sentence 3,
+    // and preserves inline code markdown for rich rendering on web.
+    expect(summarize(full)).toEqual([
+      {
+        key: "0",
+        heading: null,
+        lines: [
+          "The import cycle appears to be the root cause.",
+          "ProjectService.ts relies on KnownWorkspaces.ts, which in turn depends on MasterAssistantService.ts, creating a circular dependency.",
+          "The problematic line within ProjectService suggests premature evaluation during initialization.",
+        ],
+      },
+      {
+        key: "1",
+        heading: null,
+        lines: [
+          "The lazy loading in the Effect.gen function provides a clue for mitigating the top-level-evaluation issue.",
+        ],
+      },
+    ]);
+    expect(full[1]?.lines[0]?.markdown).toBe(s4);
+  });
+
+  it("still paginates an unusually long unpunctuated run so it never overflows the fixed viewport", () => {
+    const unpunctuated = Array.from({ length: 45 }, (_, index) => `word${index}`).join(" ");
+    const blocks = liveThinkingBlocks(unpunctuated, { maxVisualWidth: 40, maxLinesPerBlock: 3 });
+    expect(blocks.length).toBeGreaterThan(1);
+    expect(blocks.every((block) => block.lines.length > 0)).toBe(true);
+  });
+
   it("reveals streamed lines one by one, dwells before clearing, and swaps to the newest block", () => {
     const initialBlocks = liveThinkingBlocks("**Checking settings**");
     let state = createInitialLiveThinkingDisplay({
-      blockKey: "t1:0",
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:0",
       block: initialBlocks[0],
       blockCount: initialBlocks.length,
       active: true,
       reducedMotion: false,
     });
-    expect(state).toMatchObject({ blockKey: "t1:0", revealedCount: 1, phase: "showing" });
+    expect(state).toMatchObject({
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:0",
+      revealedCount: 1,
+      phase: "showing",
+    });
     expect(
       planLiveThinkingTimer(state!, {
-        latestBlockKey: "t1:0",
+        latestBlockKey: "thread-1:t1:0",
         active: true,
         elapsedSinceShownMs: 0,
       }),
@@ -298,16 +355,17 @@ describe("liveThinkingBlocks", () => {
       "**Checking settings**\n\nFirst sentence. Second sentence.",
     );
     state = reconcileLiveThinkingDisplay(state, {
-      blockKey: "t1:0",
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:0",
       block: streamedBlocks[0],
       blockCount: streamedBlocks.length,
       active: true,
       reducedMotion: false,
     });
-    expect(state).toMatchObject({ blockKey: "t1:0", revealedCount: 1, phase: "showing" });
+    expect(state).toMatchObject({ blockKey: "thread-1:t1:0", revealedCount: 1, phase: "showing" });
     expect(
       planLiveThinkingTimer(state!, {
-        latestBlockKey: "t1:0",
+        latestBlockKey: "thread-1:t1:0",
         active: true,
         elapsedSinceShownMs: 100,
       }),
@@ -325,7 +383,7 @@ describe("liveThinkingBlocks", () => {
     const nextBlock = nextBlocks.at(-1)!;
     expect(
       planLiveThinkingTimer(state!, {
-        latestBlockKey: "t1:1",
+        latestBlockKey: "thread-1:t1:1",
         active: true,
         elapsedSinceShownMs: 250,
       }),
@@ -335,31 +393,161 @@ describe("liveThinkingBlocks", () => {
     expect(state?.phase).toBe("clearing");
     expect(
       planLiveThinkingTimer(state!, {
-        latestBlockKey: "t1:1",
+        latestBlockKey: "thread-1:t1:1",
         active: true,
         elapsedSinceShownMs: 650,
+        elapsedSinceClearingMs: 70,
       }),
-    ).toEqual({ kind: "commit-cleared", delayMs: LIVE_THINKING_CLEAR_MS });
+    ).toEqual({ kind: "commit-cleared", delayMs: LIVE_THINKING_CLEAR_MS - 70 });
 
     state = applyLiveThinkingTimer(state, "commit-cleared", {
-      blockKey: "t1:1",
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:1",
       block: nextBlock,
+      active: true,
     });
     expect(state).toMatchObject({
-      blockKey: "t1:1",
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:1",
       revealedCount: 1,
       phase: "showing",
     });
     expect(state?.block.heading).toBe("Next phase");
 
+    // Committing after the thought stops streaming reveals every slot immediately.
+    const settled = applyLiveThinkingTimer(state, "commit-cleared", {
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:1",
+      block: nextBlock,
+      active: false,
+    });
+    expect(settled).toMatchObject({
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:1",
+      revealedCount: 2,
+      phase: "showing",
+    });
+
     // Reduced motion swaps immediately with every slot revealed.
     const reduced = reconcileLiveThinkingDisplay(state, {
-      blockKey: "t1:1",
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:1",
       block: nextBlock,
       blockCount: nextBlocks.length,
       active: true,
       reducedMotion: true,
     });
-    expect(reduced).toMatchObject({ blockKey: "t1:1", revealedCount: 2, phase: "showing" });
+    expect(reduced).toMatchObject({
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:1",
+      revealedCount: 2,
+      phase: "showing",
+    });
+  });
+
+  it("resets immediately when the thread or thought scope changes on a recycled row", () => {
+    const [threadABlock] = liveThinkingBlocks("Thread A thought.");
+    const [threadBBlock] = liveThinkingBlocks("Thread B thought. Second sentence.");
+
+    const threadAState = createInitialLiveThinkingDisplay({
+      scopeKey: "thread-a:thought-1",
+      blockKey: "thread-a:thought-1:0",
+      block: threadABlock,
+      blockCount: 1,
+      active: true,
+      reducedMotion: false,
+    })!;
+
+    // Switching threads or reasoning items must never dwell on or leak the prior scope's text.
+    const switched = reconcileLiveThinkingDisplay(threadAState, {
+      scopeKey: "thread-b:thought-1",
+      blockKey: "thread-b:thought-1:0",
+      block: threadBBlock,
+      blockCount: 1,
+      active: true,
+      reducedMotion: false,
+    });
+    expect(switched).toMatchObject({
+      scopeKey: "thread-b:thought-1",
+      blockKey: "thread-b:thought-1:0",
+      phase: "showing",
+      revealedCount: 1,
+    });
+    expect(switched?.block.lines[0]?.text).toBe("Thread B thought.");
+
+    // Same when the prior scope was mid-clear.
+    const clearingA = applyLiveThinkingTimer(threadAState, "begin-clear");
+    const switchedFromClearing = reconcileLiveThinkingDisplay(clearingA, {
+      scopeKey: "thread-b:thought-2",
+      blockKey: "thread-b:thought-2:0",
+      block: threadBBlock,
+      blockCount: 1,
+      active: false,
+      reducedMotion: false,
+    });
+    expect(switchedFromClearing).toMatchObject({
+      scopeKey: "thread-b:thought-2",
+      blockKey: "thread-b:thought-2:0",
+      phase: "showing",
+      revealedCount: 2,
+    });
+  });
+
+  it("buffers a tiny opening fragment of an incoming block briefly before clearing the current block", () => {
+    const [firstBlock] = liveThinkingBlocks("First paragraph done.");
+    const state = createInitialLiveThinkingDisplay({
+      scopeKey: "thread-1:t1",
+      blockKey: "thread-1:t1:0",
+      block: firstBlock,
+      blockCount: 1,
+      active: true,
+      reducedMotion: false,
+    })!;
+
+    const [, tinyIncoming] = liveThinkingBlocks("First paragraph done.\n\nThe lazy");
+    // Even after the current block finished dwelling, wait up to LIVE_THINKING_BUFFER_MS for a tiny fragment.
+    expect(
+      planLiveThinkingTimer(state, {
+        latestBlockKey: "thread-1:t1:1",
+        latestBlock: tinyIncoming,
+        active: true,
+        elapsedSinceShownMs: LIVE_THINKING_MIN_DWELL_MS + 100,
+        elapsedSinceLatestBlockMs: 50,
+      }),
+    ).toEqual({ kind: "begin-clear", delayMs: LIVE_THINKING_BUFFER_MS - 50 });
+
+    // Once the buffer expires or the stream stops, clear immediately so nothing gets stuck.
+    expect(
+      planLiveThinkingTimer(state, {
+        latestBlockKey: "thread-1:t1:1",
+        latestBlock: tinyIncoming,
+        active: true,
+        elapsedSinceShownMs: LIVE_THINKING_MIN_DWELL_MS + 400,
+        elapsedSinceLatestBlockMs: LIVE_THINKING_BUFFER_MS,
+      }),
+    ).toEqual({ kind: "begin-clear", delayMs: 0 });
+    expect(
+      planLiveThinkingTimer(state, {
+        latestBlockKey: "thread-1:t1:1",
+        latestBlock: tinyIncoming,
+        active: false,
+        elapsedSinceShownMs: 0,
+        elapsedSinceLatestBlockMs: 0,
+      }),
+    ).toEqual({ kind: "begin-clear", delayMs: 0 });
+
+    // As soon as a full sentence arrives, no extra buffer wait is needed.
+    const [, readyIncoming] = liveThinkingBlocks(
+      "First paragraph done.\n\nThe lazy loading works.",
+    );
+    expect(
+      planLiveThinkingTimer(state, {
+        latestBlockKey: "thread-1:t1:1",
+        latestBlock: readyIncoming,
+        active: true,
+        elapsedSinceShownMs: LIVE_THINKING_MIN_DWELL_MS + 100,
+        elapsedSinceLatestBlockMs: 0,
+      }),
+    ).toEqual({ kind: "begin-clear", delayMs: 0 });
   });
 });

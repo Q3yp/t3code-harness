@@ -2164,6 +2164,7 @@ function renderFeedEntry(
     return (
       <ThreadWorkGroupToggle
         environmentId={props.environmentId}
+        threadId={props.threadId}
         rowSizing={props.workRowSizing}
         expanded={entry.expanded}
         hiddenCount={entry.hiddenCount}

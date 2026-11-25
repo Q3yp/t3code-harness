@@ -656,7 +656,53 @@ export function LiveWorkEntryTimelineRow({
       aria-expanded={row.expanded}
       onClick={() => ctx.onToggleWorkGroup(row.groupId, row.id)}
     >
-      {hasThoughtPreview ? (
+      {showStreamingThought && row.thought ? (
+        thoughtIsStatus ? (
+          <>
+            <LiveActivityRow
+              label={row.active ? gt("Thinking") : gt("Thought")}
+              iconName="brain"
+              failed={failed}
+              active={row.active}
+            />
+            <div className="w-full py-1 ps-8 pe-1">
+              <LiveThinkingStream
+                key={`${ctx.routeThreadKey}:${row.thought.id}`}
+                scopeKey={`${ctx.routeThreadKey}:${row.thought.id}`}
+                text={row.thought.detail ?? ""}
+                active={row.active}
+              />
+            </div>
+          </>
+        ) : (
+          <WorkLogRow
+            icon={
+              <span className="flex size-4 items-center justify-center text-icon-muted">
+                <ToolActivityIconView
+                  icon={undefined}
+                  fallbackName="brain"
+                  className="block size-4 shrink-0 stroke-2"
+                  muted
+                />
+              </span>
+            }
+            label={
+              row.active && row.thought.toolLifecycleStatus === "inProgress"
+                ? gt("Thinking")
+                : gt("Thought")
+            }
+          >
+            <div className="ms-7 px-0.5 py-1">
+              <LiveThinkingStream
+                key={`${ctx.routeThreadKey}:${row.thought.id}`}
+                scopeKey={`${ctx.routeThreadKey}:${row.thought.id}`}
+                text={row.thought.detail ?? ""}
+                active={row.active && row.thought.toolLifecycleStatus === "inProgress"}
+              />
+            </div>
+          </WorkLogRow>
+        )
+      ) : hasThoughtPreview ? (
         <WorkLogRow
           icon={
             <span className="flex size-4 items-center justify-center text-icon-muted">
@@ -669,62 +715,56 @@ export function LiveWorkEntryTimelineRow({
             </span>
           }
           label={
-            showStreamingThought && row.thought ? (
-              <LiveThinkingStream
-                thoughtId={row.thought.id}
-                text={row.thought.detail ?? ""}
-                active={row.active}
+            <span className="line-clamp-4">
+              <ChatMarkdown
+                inline
+                text={thoughtLine}
+                cwd={ctx.markdownCwd}
+                parseRawHtml={false}
+                extensions={thoughtPreviewMarkdown(gt("Thought"))}
               />
-            ) : (
-              <span className="line-clamp-4">
-                <ChatMarkdown
-                  inline
-                  text={thoughtLine}
-                  cwd={ctx.markdownCwd}
-                  parseRawHtml={false}
-                  extensions={thoughtPreviewMarkdown(gt("Thought"))}
-                />
-              </span>
-            )
+            </span>
           }
           wrapLabel
         />
       ) : null}
-      <LiveActivityRow
-        label={
-          thoughtIsStatus ? (
-            row.active ? (
-              gt("Thinking")
+      {showStreamingThought && thoughtIsStatus ? null : (
+        <LiveActivityRow
+          label={
+            thoughtIsStatus ? (
+              row.active ? (
+                gt("Thinking")
+              ) : (
+                gt("Thought")
+              )
+            ) : row.entry.itemType === "reasoning" ? (
+              <ChatMarkdown
+                inline
+                text={(row.entry.detail ?? label).slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH)}
+                cwd={ctx.markdownCwd}
+                parseRawHtml={false}
+                extensions={
+                  row.active
+                    ? thoughtPreviewMarkdown(gt("Thinking"))
+                    : thoughtPreviewMarkdown(gt("Thought"))
+                }
+              />
+            ) : threadLabel ? (
+              <ThreadReadLabel
+                label={threadLabel}
+                environmentId={ctx.activeThreadEnvironmentId}
+                linked={false}
+              />
             ) : (
-              gt("Thought")
+              label
             )
-          ) : row.entry.itemType === "reasoning" ? (
-            <ChatMarkdown
-              inline
-              text={(row.entry.detail ?? label).slice(0, THOUGHT_PREVIEW_SOURCE_MAX_LENGTH)}
-              cwd={ctx.markdownCwd}
-              parseRawHtml={false}
-              extensions={
-                row.active
-                  ? thoughtPreviewMarkdown(gt("Thinking"))
-                  : thoughtPreviewMarkdown(gt("Thought"))
-              }
-            />
-          ) : threadLabel ? (
-            <ThreadReadLabel
-              label={threadLabel}
-              environmentId={ctx.activeThreadEnvironmentId}
-              linked={false}
-            />
-          ) : (
-            label
-          )
-        }
-        iconName={workEntryIconName(row.entry)}
-        toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
-        failed={failed}
-        active={row.active}
-      />
+          }
+          iconName={workEntryIconName(row.entry)}
+          toolIcon={row.entry.toolIcon ?? row.entry.toolSource?.icon}
+          failed={failed}
+          active={row.active}
+        />
+      )}
     </button>
   );
 }
