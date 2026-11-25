@@ -24,7 +24,15 @@ export class MasterAssistantError extends Schema.TaggedError<MasterAssistantErro
   },
 ) {
   override get message(): string {
-    return `Failed to prepare Master assistant folder at ${this.workspaceRoot}.`;
+    const detail =
+      this.cause instanceof Error
+        ? this.cause.message
+        : typeof this.cause === "string"
+          ? this.cause
+          : "";
+    return detail
+      ? `Failed to prepare Master assistant folder at ${this.workspaceRoot}: ${detail}`
+      : `Failed to prepare Master assistant folder at ${this.workspaceRoot}.`;
   }
 }
 
@@ -121,16 +129,15 @@ export class MasterAssistantService extends Context.Service<
   }
 >()("t3/workspace/MasterAssistantService") {}
 
-const make = Effect.gen(function* () {
+const makeWithProjects = Effect.fn("MasterAssistantService.makeWithProjects")(function* (
+  projects: ProjectService.ProjectService["Service"] | undefined,
+) {
   const config = yield* ServerConfig.ServerConfig;
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const home = yield* HostProcess.HomeDirectory;
   const platform = yield* HostProcess.Platform;
   const random = yield* SecureRandom.SecureRandom;
-  const projects = Option.getOrUndefined(
-    yield* Effect.serviceOption(ProjectService.ProjectService),
-  );
   const projectStore = Option.getOrUndefined(
     yield* Effect.serviceOption(ProjectStore.ProjectStoreV2),
   );
@@ -278,4 +285,20 @@ const make = Effect.gen(function* () {
   });
 });
 
-export const layer = Layer.effect(MasterAssistantService, make);
+/** Full layer with ProjectService required so `ensureMasterProject` is always wired. */
+export const layer = Layer.effect(
+  MasterAssistantService,
+  Effect.gen(function* () {
+    const projects = yield* ProjectService.ProjectService;
+    return yield* makeWithProjects(projects);
+  }),
+);
+
+/**
+ * Separate layer instance for read-only consumers (KnownWorkspaces, RuntimePolicy) that only check
+ * `masterRoot` / `isMasterPath` without pulling in `ProjectService` or colliding in Layer's MemoMap.
+ */
+export const layerReadOnly = Layer.effect(
+  MasterAssistantService,
+  Effect.suspend(() => makeWithProjects(undefined)),
+);

@@ -132,3 +132,26 @@ it.effect("honors custom masterWorkspaceRoot from server settings", () =>
     }).pipe(Effect.provide(layer));
   }).pipe(Effect.provide(NodeServices.layer)),
 );
+
+it.effect("building layerReadOnly first does not poison layer's ProjectService via MemoMap", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const baseDir = yield* fs.makeTempDirectoryScoped();
+    const shared = Layer.mergeAll(ServerConfig.layerTest(baseDir, baseDir), NodeCrypto.layer).pipe(
+      Layer.provideMerge(NodeServices.layer),
+    );
+    const readOnlyConsumer = Layer.effectDiscard(
+      MasterAssistantService.MasterAssistantService.pipe(
+        Effect.flatMap((master) => master.masterRoot),
+      ),
+    ).pipe(Layer.provide(MasterAssistantService.layerReadOnly));
+    const fullLayer = makeTestLayer({ baseDir });
+    const combined = Layer.merge(readOnlyConsumer.pipe(Layer.provide(shared)), fullLayer);
+
+    yield* Effect.gen(function* () {
+      const master = yield* MasterAssistantService.MasterAssistantService;
+      const ensured = yield* master.ensureMasterProject;
+      assert.isTrue(yield* master.isMasterProject(ensured.projectId));
+    }).pipe(Effect.provide(combined));
+  }).pipe(Effect.provide(NodeServices.layer)),
+);

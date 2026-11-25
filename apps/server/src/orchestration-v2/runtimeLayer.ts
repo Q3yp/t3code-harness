@@ -128,7 +128,7 @@ const layerRuntimePolicyProvided = RuntimePolicy.layerFromProjectStore.pipe(
   Layer.provide(layerWorkspaceFoldersProvided),
   Layer.provide(ProjectStore.layer),
   Layer.provide(AgentWorkspaceService.layer),
-  Layer.provide(MasterAssistantService.layer),
+  Layer.provide(MasterAssistantService.layerReadOnly),
 );
 
 const layerProviderEventIngestorProvided = ProviderEventIngestor.layer.pipe(

@@ -502,7 +502,7 @@ const layerKnownWorkspaces = KnownWorkspaces.layer.pipe(
   Layer.provide(ProjectStore.layer),
   Layer.provide(GitVcsDriver.layer),
   Layer.provide(AgentWorkspaceService.layer),
-  Layer.provide(MasterAssistantService.layer.pipe(Layer.provide(layerServerSettings))),
+  Layer.provide(MasterAssistantService.layerReadOnly.pipe(Layer.provide(layerServerSettings))),
 );
 
 const layerReview = ReviewService.layer.pipe(
