@@ -1964,6 +1964,7 @@ export function threadShellFromProjection(
     ...(projection.thread.activeWorkspace === undefined
       ? {}
       : { activeWorkspace: projection.thread.activeWorkspace }),
+    ...(projection.thread.launchedByMaster === true ? { launchedByMaster: true } : {}),
     pullRequests: threadPullRequestsOf(projection.thread),
     ...(projection.thread.linkedPullRequest === undefined
       ? {}
@@ -2288,6 +2289,7 @@ function shellFromState(input: {
     ...(input.state.thread.activeWorkspace === undefined
       ? {}
       : { activeWorkspace: input.state.thread.activeWorkspace }),
+    ...(input.state.thread.launchedByMaster === true ? { launchedByMaster: true } : {}),
     pullRequests: threadPullRequestsOf(input.state.thread),
     ...(input.state.thread.linkedPullRequest === undefined
       ? {}

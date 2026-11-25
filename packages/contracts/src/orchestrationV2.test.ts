@@ -12,6 +12,7 @@ import {
   TrimmedNonEmptyString,
 } from "./index.ts";
 import {
+  isWorkspaceContinuationMessage,
   latestProviderTurnForAttempt,
   OrchestrationV2CheckpointFileSummary,
   repositoryRewindCheckpoint,
@@ -743,5 +744,34 @@ describe("withMessageSenderNote", () => {
     [{ createdBy: "agent", creationSource: "server" }, "Hi", "Hi"],
   ] as const)("labels %j's message %j for the provider", (message, text, expected) => {
     expect(withMessageSenderNote(message, text)).toBe(expected);
+  });
+});
+
+describe("isWorkspaceContinuationMessage", () => {
+  it("matches internal workspace activate/clear continuation user messages only", () => {
+    expect(
+      isWorkspaceContinuationMessage({
+        id: "message:mcp:session-1:workspace-activate-continuation:abc-123",
+        role: "user",
+      }),
+    ).toBe(true);
+    expect(
+      isWorkspaceContinuationMessage({
+        messageId: "message:mcp:session-1:workspace-clear-continuation:def-456",
+        role: "user",
+      }),
+    ).toBe(true);
+    expect(
+      isWorkspaceContinuationMessage({
+        id: "message:mcp:session-1:workspace-activate-continuation:abc-123",
+        role: "assistant",
+      }),
+    ).toBe(false);
+    expect(
+      isWorkspaceContinuationMessage({
+        id: "message:user:regular-id",
+        role: "user",
+      }),
+    ).toBe(false);
   });
 });

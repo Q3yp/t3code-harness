@@ -112,6 +112,7 @@ export interface ThreadLaunchInput {
   readonly interactionMode: ProviderInteractionMode;
   readonly workspaceStrategy: ThreadLaunchWorkspaceStrategy;
   readonly activeWorkspace?: ThreadActiveWorkspace | null;
+  readonly launchedByMaster?: boolean;
   readonly initialMessage?: ThreadLaunchInitialMessage;
   readonly importedNativeThread?: {
     readonly ref: {
@@ -1543,6 +1544,7 @@ const make = Effect.gen(function* () {
                 ...(input.activeWorkspace === undefined
                   ? {}
                   : { activeWorkspace: input.activeWorkspace }),
+                ...(input.launchedByMaster === true ? { launchedByMaster: true } : {}),
                 ...(input.importedNativeThread === undefined
                   ? {}
                   : { importedNativeThread: input.importedNativeThread }),

@@ -522,6 +522,10 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
             )?.supportedRuntimeModes,
           });
         }
+        const launchedByMaster =
+          caller !== undefined &&
+          masterAssistant !== undefined &&
+          (yield* masterAssistant.isMasterProject(caller.projectId));
         const result = yield* ThreadMessageIntake.launchThread({
           commandId,
           threadId,
@@ -536,6 +540,7 @@ export const layer = McpToolAccess.toLayer(ProjectToolkit, {
           ...(resolvedActiveWorkspace === undefined
             ? {}
             : { activeWorkspace: resolvedActiveWorkspace }),
+          ...(launchedByMaster ? { launchedByMaster: true } : {}),
           ...(input.message === undefined && attachments.length === 0
             ? {}
             : {

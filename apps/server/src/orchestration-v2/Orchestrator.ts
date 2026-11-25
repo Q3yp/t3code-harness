@@ -4145,6 +4145,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...(command.activeWorkspace === undefined
         ? {}
         : { activeWorkspace: command.activeWorkspace }),
+      ...(command.launchedByMaster === true ? { launchedByMaster: true } : {}),
       activeProviderThreadId: null,
       pullRequests: [],
       ...(command.linkOrigin === undefined ? {} : { linkOrigin: command.linkOrigin }),

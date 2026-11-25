@@ -165,6 +165,7 @@ export interface EnvironmentThreadShell {
   readonly branch: string | null;
   readonly worktreePath: string | null;
   readonly activeWorkspace: import("@t3tools/contracts").ThreadActiveWorkspace | null;
+  readonly launchedByMaster?: true;
   readonly lineage: OrchestrationV2ThreadShell["lineage"];
   readonly forkedFrom: OrchestrationV2ThreadShell["forkedFrom"];
   readonly linkOrigin: OrchestrationV2ThreadShell["linkOrigin"] | null;
@@ -317,6 +318,7 @@ export function presentThreadShell(
     branch: thread.branch,
     worktreePath: thread.worktreePath,
     activeWorkspace: thread.activeWorkspace ?? null,
+    ...(thread.launchedByMaster === true ? { launchedByMaster: true as const } : {}),
     pullRequests: threadPullRequestsOf(thread),
     linkedPullRequest: thread.linkedPullRequest ?? null,
     branchPullRequest: thread.branchPullRequest ?? null,

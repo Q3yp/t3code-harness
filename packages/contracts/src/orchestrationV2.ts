@@ -515,6 +515,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Active Agent Workspace for this thread, overriding the effective working root without mutating worktreePath. */
   activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
+  /** True when this top-level thread was launched from the Master assistant thread. */
+  launchedByMaster: Schema.optional(Schema.Boolean),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -644,6 +646,23 @@ export function isCompactionCommandMessage(message: CompactionMessageFields): bo
     message.role === "user" &&
     message.text.trim().toLowerCase() === IDLE_COMPACTION_TEXT &&
     (message.attachments?.length ?? 0) === 0
+  );
+}
+
+const WORKSPACE_CONTINUATION_MESSAGE_ID =
+  /^message:mcp:[^:]+:workspace-(?:activate|clear)-continuation:/u;
+
+/** Internal continuation prompt dispatched when workspace_activate or workspace_clear restarts a session. */
+export function isWorkspaceContinuationMessage(message: {
+  readonly id?: string | undefined;
+  readonly messageId?: string | undefined;
+  readonly role?: string | undefined;
+}): boolean {
+  const id = message.id ?? message.messageId;
+  if (id === undefined) return false;
+  return (
+    (message.role === undefined || message.role === "user") &&
+    WORKSPACE_CONTINUATION_MESSAGE_ID.test(id)
   );
 }
 
@@ -2466,6 +2485,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   /** Active Agent Workspace for this thread, overriding the effective working root without mutating worktreePath. */
   activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
+  /** True when this top-level thread was launched from the Master assistant thread. */
+  launchedByMaster: Schema.optional(Schema.Boolean),
   linkedPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
   pullRequests: Schema.optional(Schema.Array(ThreadPullRequestLink)),
   branchPullRequest: Schema.optional(Schema.NullOr(ThreadLinkedPullRequest)),
@@ -3394,6 +3415,8 @@ export const OrchestrationV2Command = Schema.Union([
     branch: Schema.NullOr(GitRefName),
     worktreePath: Schema.NullOr(TrimmedNonEmptyString),
     activeWorkspace: Schema.optional(Schema.NullOr(ThreadActiveWorkspace)),
+    /** Only the server sets this when a top-level thread is launched from the Master assistant. */
+    launchedByMaster: Schema.optional(Schema.Boolean),
     /** Only the server sets this; a client's thread.create never carries one. */
     linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
     /** Only the server sets this, with `linkOrigin`, for a linked environment's delegated task. */

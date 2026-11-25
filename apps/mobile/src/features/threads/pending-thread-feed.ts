@@ -1,5 +1,6 @@
 import {
   isCompactionCommandMessage,
+  isWorkspaceContinuationMessage,
   type ThreadGuestMessage,
   type ThreadGuestShare,
 } from "@t3tools/contracts";
@@ -210,6 +211,7 @@ export function createPendingTurnAppender() {
       last.pendingMessage === undefined ||
       last.pendingMessage.creation !== undefined ||
       isCompactionCommandMessage(last.message) ||
+      isWorkspaceContinuationMessage(last.message) ||
       feed.some(
         (entry) =>
           (entry.type === "run-fold" && entry.workingSince !== undefined) ||

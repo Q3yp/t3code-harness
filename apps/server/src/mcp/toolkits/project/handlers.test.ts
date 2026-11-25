@@ -1491,3 +1491,68 @@ it.effect("t3_thread_launch refuses to create additional threads in the Master p
     });
   }),
 );
+
+it.effect("t3_thread_launch marks threads launched from Master with launchedByMaster", () =>
+  Effect.gen(function* () {
+    const launched: Array<ThreadLaunch.ThreadLaunchInput> = [];
+    const masterProjectId = ProjectId.make("project:master");
+    const masterThreadId = ThreadId.make("thread:master");
+    const harness = clientLaunchHarness({ runtimeModeCeiling: "full-access", launched });
+    const dependencies = Layer.merge(
+      harness.dependencies,
+      Layer.mergeAll(
+        Layer.succeed(McpInvocationContext.McpInvocationContext, {
+          environmentId: EnvironmentId.make("environment"),
+          requestNamespace: "thread:master",
+          thread: {
+            threadId: masterThreadId,
+            providerSessionId: "session-master",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+          },
+          client: undefined,
+          issuedAt: 0,
+          capabilities: new Set(["orchestration" as const]),
+        }),
+        Layer.mock(ThreadManagement.ThreadManagementService)({
+          getThreadShell: (threadId) =>
+            Effect.succeed(
+              threadId === masterThreadId
+                ? ({
+                    id: masterThreadId,
+                    projectId: masterProjectId,
+                    modelSelection: harness.modelSelection,
+                    runtimeMode: "full-access",
+                    interactionMode: "default",
+                    activeRunId: "run-master",
+                    providerInstanceId: ProviderInstanceId.make("codex"),
+                    pendingBackgroundTasks: [],
+                    archivedAt: null,
+                    deletedAt: null,
+                  } as unknown as OrchestrationV2ThreadShell)
+                : null,
+            ),
+        }),
+        Layer.mock(MasterAssistantService.MasterAssistantService)({
+          isMasterProject: (id) => Effect.succeed(id === masterProjectId),
+        }),
+      ),
+    );
+    const toolkit = yield* ProjectToolkit.pipe(
+      Effect.provide(
+        McpToolAccess.HandlersLayer.layer(ProjectHandlers.layer).pipe(Layer.provide(dependencies)),
+      ),
+    );
+
+    yield* toolkit
+      .handle("t3_thread_launch", {
+        title: "Build Barn Planner",
+        projectId: harness.projectId,
+        message: "Start implementing Barn Planner.",
+      })
+      .pipe(Stream.unwrap, Stream.runCollect, Effect.provide(dependencies));
+
+    expect(launched).toHaveLength(1);
+    expect(launched[0]?.projectId).toBe(harness.projectId);
+    expect(launched[0]?.launchedByMaster).toBe(true);
+  }),
+);

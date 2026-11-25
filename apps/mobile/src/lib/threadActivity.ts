@@ -59,7 +59,13 @@ import type {
   ScheduledTaskId,
   TurnItemId,
 } from "@t3tools/contracts";
-import { idleCompactionOf, isCompactionCommandMessage, RunId, ThreadId } from "@t3tools/contracts";
+import {
+  idleCompactionOf,
+  isCompactionCommandMessage,
+  isWorkspaceContinuationMessage,
+  RunId,
+  ThreadId,
+} from "@t3tools/contracts";
 import {
   classifyToolActivity,
   collectToolFilePaths,
@@ -1919,9 +1925,10 @@ export function deriveThreadFeedPresentation(
     }
     if (
       (entry.type === "message" &&
-        entry.message.runId !== null &&
-        compactionItemRunIds.has(entry.message.runId) &&
-        isCompactionCommandMessage(entry.message)) ||
+        ((entry.message.runId !== null &&
+          compactionItemRunIds.has(entry.message.runId) &&
+          isCompactionCommandMessage(entry.message)) ||
+          isWorkspaceContinuationMessage(entry.message))) ||
       (entry.type === "activity-group" &&
         entry.runId !== null &&
         compactionItemRunIds.has(entry.runId) &&

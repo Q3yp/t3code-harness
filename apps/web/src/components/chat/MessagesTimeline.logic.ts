@@ -56,6 +56,7 @@ import {
   idleCompactionOf,
   isCompactionCommandMessage,
   isOrchestrationV2WorkActive,
+  isWorkspaceContinuationMessage,
   type MessageId,
   type OrchestrationV2IdleCompaction,
   type WorktreeSetupSnapshot,
@@ -2306,6 +2307,10 @@ export function deriveMessagesTimelineRows(
           active: pending,
         });
       }
+      continue;
+    }
+
+    if (isWorkspaceContinuationMessage(timelineEntry.message)) {
       continue;
     }
 
