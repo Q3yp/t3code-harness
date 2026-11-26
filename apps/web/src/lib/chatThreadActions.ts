@@ -1,8 +1,13 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
+import {
+  scopeProjectRef,
+  scopeThreadRef,
+  scopedThreadKey,
+} from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/shell";
+import { isThreadWorking } from "@t3tools/client-runtime/state/thread-inbox";
 import {
   isListedThreadLineage,
   type EnvironmentId,
@@ -61,6 +66,79 @@ export function selectCanonicalMasterThread<
       return left.id.localeCompare(right.id);
     })[0] ?? null
   );
+}
+
+function threadActivityMs(thread: Pick<EnvironmentThreadShell, "updatedAt" | "createdAt">): number {
+  const updated = Date.parse(thread.updatedAt);
+  if (Number.isFinite(updated)) return updated;
+  const created = Date.parse(thread.createdAt);
+  return Number.isFinite(created) ? created : 0;
+}
+
+/**
+ * Lists active (non-settled, non-archived, non-deleted) top-level sessions launched from Master,
+ * ordered with working sessions first, then sessions waiting on input/approval, then newest.
+ */
+export function selectMasterDerivedThreads<
+  T extends Pick<
+    EnvironmentThreadShell,
+    | "environmentId"
+    | "id"
+    | "projectId"
+    | "createdAt"
+    | "updatedAt"
+    | "deletedAt"
+    | "archivedAt"
+    | "lineage"
+    | "settledOverride"
+    | "settledAt"
+    | "runtime"
+    | "latestRun"
+    | "interactionMode"
+    | "hasActionableProposedPlan"
+    | "hasPendingApprovals"
+    | "hasPendingUserInput"
+    | "pendingSubagentRequest"
+    | "launchedByMaster"
+  >,
+>(
+  threads: ReadonlyArray<T>,
+  options: {
+    readonly masterProjectKeys: ReadonlySet<string>;
+    readonly masterThreadKey: string | null;
+  },
+): ReadonlyArray<T> {
+  return threads
+    .filter((thread) => {
+      if (
+        thread.deletedAt !== null ||
+        thread.archivedAt !== null ||
+        !isListedThreadLineage(thread.lineage)
+      ) {
+        return false;
+      }
+      const isSettled =
+        thread.settledOverride === "settled" ||
+        (thread.settledOverride === null && thread.settledAt !== null);
+      if (isSettled) return false;
+      const key = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      if (key === options.masterThreadKey) return false;
+      return (
+        thread.launchedByMaster === true ||
+        options.masterProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)
+      );
+    })
+    .toSorted((left, right) => {
+      const leftWorking = isThreadWorking(left) ? 1 : 0;
+      const rightWorking = isThreadWorking(right) ? 1 : 0;
+      if (leftWorking !== rightWorking) return rightWorking - leftWorking;
+      const leftAttention = left.hasPendingApprovals || left.hasPendingUserInput ? 1 : 0;
+      const rightAttention = right.hasPendingApprovals || right.hasPendingUserInput ? 1 : 0;
+      if (leftAttention !== rightAttention) return rightAttention - leftAttention;
+      const timeDiff = threadActivityMs(right) - threadActivityMs(left);
+      if (timeDiff !== 0) return timeDiff;
+      return left.id.localeCompare(right.id);
+    });
 }
 
 type ComposerModelSelectionState = Pick<

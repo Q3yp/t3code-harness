@@ -1010,6 +1010,7 @@
   "154b0a0947b7f831": "En mycket högre gräns för GitHub API än en personlig token eller gh login.",
   "154d42b7c7e0a68f": "Anslut Magic Keyboard",
   "154f5ea0ff2aa6b6": "{status, select, inProgress {Ändrar status för ett ärende} completed {Ändrade status för ett ärende} failed {Kunde inte ändra status för ett ärende} declined {Avböjde att ändra status för ett ärende} stopped {Slutade ändra status för ett ärende} other {Ändrar status för ett ärende}}",
+  "1553f52f3159e90f": "{count, plural, one {{count} session} other {{count} sessioner}}",
   "1565dfce5dec4b82": "Skapa parkopplingslänk",
   "15672ff2f044d23a": [
     "Diffen kunde inte läsas in, så utdrag saknas: ",
@@ -4261,6 +4262,7 @@
   "53a960b81e52d6d6": "Kan fortfarande inte kontrollera åtkomsten. Se Avancerat för hjälp.",
   "53b05fd56e4de55b": "Sluta använda din {name}-fil; filen ligger kvar på disken",
   "53b43edec35ee1f9": "Klistra in",
+  "53b6a1bb66a65417": "{count} väntar",
   "53b9a6ba24deb0e7": "Navigering",
   "53c162d8868a1d0e": "Lägg till miljö",
   "53d8d8abf687e210": "Den här arbetsboken innehåller ogiltiga bladdimensioner.",

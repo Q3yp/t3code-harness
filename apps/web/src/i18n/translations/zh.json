@@ -1012,6 +1012,7 @@
   "154b0a0947b7f831": "GitHub API 请求额度远高于个人 token 或 gh 登录。",
   "154d42b7c7e0a68f": "连接妙控键盘",
   "154f5ea0ff2aa6b6": "{status, select, inProgress {正在更改 issue 状态} completed {已更改 issue 状态} failed {更改 issue 状态失败} declined {已拒绝更改 issue 状态} stopped {已停止更改 issue 状态} other {正在更改 issue 状态}}",
+  "1553f52f3159e90f": "{count, plural, other {{count} 个会话}}",
   "1565dfce5dec4b82": "创建配对链接",
   "15672ff2f044d23a": [
     "无法加载差异，因此缺少摘录：",
@@ -4270,6 +4271,7 @@
   "53a960b81e52d6d6": "仍无法检查权限，请展开“高级”查看帮助。",
   "53b05fd56e4de55b": "停止使用你的 {name} 文件；文件会保留在磁盘上",
   "53b43edec35ee1f9": "粘贴",
+  "53b6a1bb66a65417": "{count} 个等待中",
   "53b9a6ba24deb0e7": "导航",
   "53c162d8868a1d0e": "添加环境",
   "53d8d8abf687e210": "此工作簿包含无效的工作表尺寸。",

@@ -1010,6 +1010,7 @@
   "154b0a0947b7f831": "Um limite de requisições da API do GitHub bem maior que o de um token pessoal ou do gh login.",
   "154d42b7c7e0a68f": "Conectar o Magic Keyboard",
   "154f5ea0ff2aa6b6": "{status, select, inProgress {Alterando o estado de uma issue} completed {Alterou o estado de uma issue} failed {Falha ao alterar o estado de uma issue} declined {Recusou-se a alterar o estado de uma issue} stopped {Parou de alterar o estado de uma issue} other {Alterando o estado de uma issue}}",
+  "1553f52f3159e90f": "{count, plural, one {{count} sessão} other {{count} sessões}}",
   "1565dfce5dec4b82": "Criar link de pareamento",
   "15672ff2f044d23a": [
     "Não foi possível carregar o diff, então faltam trechos: ",
@@ -4258,6 +4259,7 @@
   "53a960b81e52d6d6": "Ainda não foi possível verificar o acesso. Veja Avançado para obter ajuda.",
   "53b05fd56e4de55b": "Parar de usar seu arquivo {name}; o arquivo continua no disco",
   "53b43edec35ee1f9": "Colar",
+  "53b6a1bb66a65417": "{count} aguardando",
   "53b9a6ba24deb0e7": "Navegação",
   "53c162d8868a1d0e": "Adicionar ambiente",
   "53d8d8abf687e210": "Esta pasta de trabalho contém dimensões de planilha inválidas.",

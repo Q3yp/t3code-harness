@@ -1010,6 +1010,7 @@
   "154b0a0947b7f831": "Une limite de débit de l’API GitHub bien plus élevée qu’avec un jeton personnel ou gh login.",
   "154d42b7c7e0a68f": "Attacher le Magic Keyboard",
   "154f5ea0ff2aa6b6": "{status, select, inProgress {Modification de l’état d’un ticket} completed {État d’un ticket modifié} failed {Impossible de modifier l’état d’un ticket} declined {Refus de modifier l’état d’un ticket} stopped {Arrêt de la modification de l’état d’un ticket} other {Modification de l’état d’un ticket}}",
+  "1553f52f3159e90f": "{count, plural, one {{count} session} other {{count} sessions}}",
   "1565dfce5dec4b82": "Créer un lien d’appairage",
   "15672ff2f044d23a": [
     "Le diff n’a pas pu être chargé, des extraits manquent donc : ",
@@ -4258,6 +4259,7 @@
   "53a960b81e52d6d6": "Toujours impossible de vérifier l’accès. Consultez Avancé pour obtenir de l’aide.",
   "53b05fd56e4de55b": "Cesser d’utiliser votre fichier {name} ; le fichier reste sur le disque",
   "53b43edec35ee1f9": "Coller",
+  "53b6a1bb66a65417": "{count} en attente",
   "53b9a6ba24deb0e7": "Navigation",
   "53c162d8868a1d0e": "Ajouter un environnement",
   "53d8d8abf687e210": "Ce classeur contient des dimensions de feuille non valides.",

@@ -23,7 +23,7 @@ import { useContext, useState } from "react";
 
 import { stackedThreadToast, toastManager } from "~/components/ui/toast";
 import { m } from "~/i18n/messages";
-import { selectCanonicalMasterThread } from "~/lib/chatThreadActions";
+import { selectCanonicalMasterThread, selectMasterDerivedThreads } from "~/lib/chatThreadActions";
 import { useProjects, useQuietThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
 import { projectEnvironment } from "~/state/projects";
@@ -78,6 +78,10 @@ export function useMasterAssistant() {
     masterThread === null
       ? null
       : scopedThreadKey(scopeThreadRef(masterThread.environmentId, masterThread.id));
+  const masterDerivedThreads = selectMasterDerivedThreads(threads, {
+    masterProjectKeys,
+    masterThreadKey,
+  });
 
   const openMaster = async (): Promise<void> => {
     if (masterEnvironmentId === null || isOpening) return;
@@ -131,6 +135,7 @@ export function useMasterAssistant() {
     masterProjectKeys,
     masterThread,
     masterThreadKey,
+    masterDerivedThreads,
     isOpening,
     openMaster,
   };

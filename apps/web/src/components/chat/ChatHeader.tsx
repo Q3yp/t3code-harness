@@ -13,7 +13,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import { T, useGT, Var } from "gt-react";
-import { ArrowRightIcon, BotIcon, ChevronDownIcon, LayersIcon } from "lucide-react";
+import { ChevronDownIcon, LayersIcon } from "lucide-react";
 import {
   memo,
   useEffect,
@@ -55,7 +55,6 @@ interface ChatHeaderProps {
   isServerThread: boolean;
   activeProject: EnvironmentProject | null;
   activeWorkspace?: ThreadActiveWorkspace | null | undefined;
-  launchedByMaster?: boolean | undefined;
   parentThreadLink: { threadId: ThreadId; title: string } | null;
   onOpenThread: (threadId: ThreadId) => void;
   rightPanelOpen: boolean;
@@ -82,7 +81,6 @@ export const ChatHeader = memo(function ChatHeader({
   isServerThread,
   activeProject,
   activeWorkspace = null,
-  launchedByMaster = false,
   parentThreadLink,
   onOpenThread,
   rightPanelOpen,
@@ -269,19 +267,6 @@ export const ChatHeader = memo(function ChatHeader({
         ariaLabel={gt("Thread breadcrumb")}
         className="flex-1 overflow-clip [overflow-clip-margin:2px]"
       >
-        {launchedByMaster && (activeWorkspace || (activeProject && !activeProject.isMaster)) ? (
-          <>
-            <WorkspaceBreadcrumbItem className="shrink-0">
-              <span className="inline-flex items-center gap-1 text-primary/90">
-                <BotIcon className="size-3.5 shrink-0" aria-hidden />
-                <span>{gt("Master")}</span>
-              </span>
-            </WorkspaceBreadcrumbItem>
-            <WorkspaceBreadcrumbSeparator>
-              <ArrowRightIcon className="size-3 shrink-0 text-muted-foreground/70" aria-hidden />
-            </WorkspaceBreadcrumbSeparator>
-          </>
-        ) : null}
         {activeWorkspace || activeProject ? (
           <>
             <WorkspaceBreadcrumbItem className="shrink">

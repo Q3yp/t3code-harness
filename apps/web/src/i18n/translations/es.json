@@ -1010,6 +1010,7 @@
   "154b0a0947b7f831": "Un límite de solicitudes de la API de GitHub mucho mayor que con un token personal o gh login.",
   "154d42b7c7e0a68f": "Acoplar el Magic Keyboard",
   "154f5ea0ff2aa6b6": "{status, select, inProgress {Cambiando el estado de una issue} completed {Cambió el estado de una issue} failed {No se pudo cambiar el estado de una issue} declined {Se rechazó cambiar el estado de una issue} stopped {Se dejó de cambiar el estado de una issue} other {Cambiando el estado de una issue}}",
+  "1553f52f3159e90f": "{count, plural, one {{count} sesión} other {{count} sesiones}}",
   "1565dfce5dec4b82": "Crear enlace de emparejamiento",
   "15672ff2f044d23a": [
     "No se pudo cargar el diff, así que faltan fragmentos: ",
@@ -4255,6 +4256,7 @@
   "53a960b81e52d6d6": "Aún no se puede comprobar el acceso. Consulta Avanzado para obtener ayuda.",
   "53b05fd56e4de55b": "Dejar de usar tu archivo de {name}; el archivo se queda en el disco",
   "53b43edec35ee1f9": "Pegar",
+  "53b6a1bb66a65417": "{count} en espera",
   "53b9a6ba24deb0e7": "Navegación",
   "53c162d8868a1d0e": "Añadir entorno",
   "53d8d8abf687e210": "Este libro contiene dimensiones de hoja no válidas.",

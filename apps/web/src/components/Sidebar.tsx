@@ -69,7 +69,6 @@ import {
 } from "@t3tools/client-runtime/state/threads";
 
 import {
-  BotIcon,
   CheckIcon,
   ChevronDownIcon,
   FolderIcon,
@@ -198,7 +197,6 @@ import {
 import {
   applySidebarThreadDrop,
   filterSidebarV2VisibleThreads,
-  hasUnseenCompletion,
   threadMatchesWorkspaceScopes,
   type SidebarWorkspaceScope,
   groupSidebarThreadsByProject,
@@ -276,8 +274,9 @@ import {
 } from "./ui/combobox";
 import { SidebarContent, SidebarGroup, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
+import { SidebarMasterSlot } from "./sidebar/SidebarMasterSlot";
 import { SidebarHeaderIconButton, SidebarThreadHeader } from "./sidebar/SidebarThreadHeader";
-import { Tooltip, TooltipPopup, TooltipProvider, TooltipTrigger } from "./ui/tooltip";
+import { TooltipProvider } from "./ui/tooltip";
 import {
   composerDraftHasUserContent,
   DraftId,
@@ -1104,6 +1103,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     masterProjectKeys,
     masterThread,
     masterThreadKey,
+    masterDerivedThreads,
     isOpening: isOpeningMaster,
     openMaster,
   } = useMasterAssistant();
@@ -3554,82 +3554,33 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
             />
-            {masterEnvironmentId !== null
-              ? (() => {
-                  const isMasterRouteActive =
-                    (masterThreadKey !== null && routeRowThreadKey === masterThreadKey) ||
-                    (masterThreadKey === null &&
-                      routeDraftThread !== null &&
-                      masterProjectKeys.has(
-                        `${routeDraftThread.environmentId}:${routeDraftThread.projectId}`,
-                      ));
-                  const masterWorking = masterThread !== null && isThreadWorking(masterThread);
-                  const masterUnread =
-                    masterThread !== null &&
-                    !isMasterRouteActive &&
-                    hasUnseenCompletion(masterThread);
-                  return (
-                    <TooltipProvider delay={300}>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <button
-                              type="button"
-                              data-testid="sidebar-master-slot"
-                              disabled={isOpeningMaster}
-                              onClick={() => {
-                                if (isMobile) setOpenMobile(false);
-                                void openMaster();
-                              }}
-                              className={cn(
-                                "mt-1.5 flex w-full cursor-pointer items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs font-medium transition-colors",
-                                isMasterRouteActive
-                                  ? "bg-sidebar-row-active text-sidebar-foreground"
-                                  : "text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-                              )}
-                            >
-                              <BotIcon
-                                className={cn(
-                                  "size-3.5 shrink-0",
-                                  masterWorking
-                                    ? "animate-pulse text-primary"
-                                    : isMasterRouteActive
-                                      ? "text-primary"
-                                      : "text-sidebar-muted-foreground",
-                                )}
-                                aria-hidden
-                              />
-                              <span className="min-w-0 flex-1 truncate">{gt("Master")}</span>
-                              {masterWorking ? (
-                                <span className="shrink-0 text-2xs text-primary">
-                                  <T>Working</T>
-                                </span>
-                              ) : masterUnread ? (
-                                <span
-                                  className="size-1.5 shrink-0 rounded-full bg-primary"
-                                  aria-label={gt("Unread")}
-                                />
-                              ) : null}
-                            </button>
-                          }
-                        />
-                        {masterWorkspaceRoot ? (
-                          <TooltipPopup side="right">
-                            <div className="space-y-0.5">
-                              <div className="font-medium">
-                                <T>Master Assistant</T>
-                              </div>
-                              <div className="font-mono text-2xs opacity-80">
-                                {masterWorkspaceRoot}
-                              </div>
-                            </div>
-                          </TooltipPopup>
-                        ) : null}
-                      </Tooltip>
-                    </TooltipProvider>
-                  );
-                })()
-              : null}
+            {masterEnvironmentId !== null ? (
+              <SidebarMasterSlot
+                masterWorkspaceRoot={masterWorkspaceRoot}
+                masterThread={masterThread}
+                masterThreadKey={masterThreadKey}
+                derivedThreads={masterDerivedThreads}
+                routeRowThreadKey={routeRowThreadKey}
+                isMasterDraftRouteActive={
+                  masterThreadKey === null &&
+                  routeDraftThread !== null &&
+                  masterProjectKeys.has(
+                    `${routeDraftThread.environmentId}:${routeDraftThread.projectId}`,
+                  )
+                }
+                isOpening={isOpeningMaster}
+                projectByKey={projectByKey}
+                projectDisplayNameByKey={projectDisplayNameByKey}
+                onOpenMaster={() => {
+                  if (isMobile) setOpenMobile(false);
+                  void openMaster();
+                }}
+                onSelectDerivedThread={(threadRef) => {
+                  if (isMobile) setOpenMobile(false);
+                  navigateToThread(threadRef);
+                }}
+              />
+            ) : null}
           </SidebarGroup>
         }
       >

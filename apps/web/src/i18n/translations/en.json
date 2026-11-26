@@ -1010,6 +1010,7 @@
   "154b0a0947b7f831": "A far higher GitHub API rate limit than a personal token or gh login.",
   "154d42b7c7e0a68f": "Attach Magic Keyboard",
   "154f5ea0ff2aa6b6": "{status, select, inProgress {Changing an issue's state} completed {Changed an issue's state} failed {Failed to change an issue's state} declined {Declined to change an issue's state} stopped {Stopped changing an issue's state} other {Changing an issue's state}}",
+  "1553f52f3159e90f": "{count, plural, one {{count} session} other {{count} sessions}}",
   "1565dfce5dec4b82": "Create pairing link",
   "15672ff2f044d23a": [
     "The diff could not be loaded, so excerpts are missing: ",
@@ -4262,6 +4263,7 @@
   "53a960b81e52d6d6": "Still unable to check access. See Advanced for help.",
   "53b05fd56e4de55b": "Stop using your {name} file; the file stays on disk",
   "53b43edec35ee1f9": "Paste",
+  "53b6a1bb66a65417": "{count} waiting",
   "53b9a6ba24deb0e7": "Navigation",
   "53c162d8868a1d0e": "Add environment",
   "53d8d8abf687e210": "This workbook contains invalid worksheet dimensions.",
